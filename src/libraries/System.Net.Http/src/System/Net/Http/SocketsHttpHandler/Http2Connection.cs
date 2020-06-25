@@ -844,12 +844,25 @@ namespace System.Net.Http
 
                 // Invoke the callback with the supplied state and the target write buffer.
                 _outgoingBuffer.EnsureAvailableSpace(writeBytes);
-                FlushTiming flush = lockedAction(state, _outgoingBuffer.AvailableMemorySliced(writeBytes));
 
-                // Finish the write
-                _outgoingBuffer.Commit(writeBytes);
-                _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
-                EndWrite(forceFlush: flush == FlushTiming.Now);
+                bool forceFlush = false;
+                try
+                {
+                    // NOTE: lockedAction can only fail in the HEADERS case, when we are unable to allocate a new streamID,
+                    // either because we're run out or we've received a GOAWAY.
+                    // Eventually I'll need to move the streamID allocation logic here, but for now, just catch the exception
+                    // so we can do the appropriate EndWrite here instead of in the caller
+
+                    FlushTiming flush = lockedAction(state, _outgoingBuffer.AvailableMemorySliced(writeBytes));
+
+                    _outgoingBuffer.Commit(writeBytes);
+                    _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
+                    forceFlush = flush == FlushTiming.Now;
+                }
+                finally
+                {
+                    EndWrite(forceFlush);
+                }
             }
             finally
             {
@@ -1231,68 +1244,60 @@ namespace System.Net.Http
                 // streams are created and started in order.
                 await PerformWriteAsync(totalSize, (thisRef: this, http2Stream, current, remaining, totalSize, flags, mustFlush), (s, writeBuffer) =>
                 {
-                    try
+                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Started writing. {nameof(s.totalSize)}={s.totalSize}");
+
+                    // Allocate the next available stream ID. Note that if we fail before sending the headers,
+                    // we'll just skip this stream ID, which is fine.
+                    lock (s.thisRef.SyncObject)
                     {
-                        if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Started writing. {nameof(s.totalSize)}={s.totalSize}");
-
-                        // Allocate the next available stream ID. Note that if we fail before sending the headers,
-                        // we'll just skip this stream ID, which is fine.
-                        lock (s.thisRef.SyncObject)
+                        if (s.thisRef._nextStream == MaxStreamId || s.thisRef._disposed || s.thisRef._lastStreamId != -1)
                         {
-                            if (s.thisRef._nextStream == MaxStreamId || s.thisRef._disposed || s.thisRef._lastStreamId != -1)
-                            {
-                                // We ran out of stream IDs or we raced between acquiring the connection from the pool and shutting down.
-                                // Throw a retryable request exception. This will cause retry logic to kick in
-                                // and perform another connection attempt. The user should never see this exception.
-                                s.thisRef.ThrowShutdownException();
-                            }
-
-                            // Now that we're holding the lock, configure the stream.  The lock must be held while
-                            // assigning the stream ID to ensure only one stream gets an ID, and it must be held
-                            // across setting the initial window size (available credit) and storing the stream into
-                            // collection such that window size updates are able to atomically affect all known streams.
-                            s.http2Stream.Initialize(s.thisRef._nextStream, _initialWindowSize);
-
-                            // Client-initiated streams are always odd-numbered, so increase by 2.
-                            s.thisRef._nextStream += 2;
-
-                            // We're about to flush the HEADERS frame, so add the stream to the dictionary now.
-                            // The lifetime of the stream is now controlled by the stream itself and the connection.
-                            // This can fail if the connection is shutting down, in which case we will cancel sending this frame.
-                            s.thisRef._httpStreams.Add(s.http2Stream.StreamId, s.http2Stream);
+                            // We ran out of stream IDs or we raced between acquiring the connection from the pool and shutting down.
+                            // Throw a retryable request exception. This will cause retry logic to kick in
+                            // and perform another connection attempt. The user should never see this exception.
+                            s.thisRef.ThrowShutdownException();
                         }
 
-                        Span<byte> span = writeBuffer.Span;
+                        // Now that we're holding the lock, configure the stream.  The lock must be held while
+                        // assigning the stream ID to ensure only one stream gets an ID, and it must be held
+                        // across setting the initial window size (available credit) and storing the stream into
+                        // collection such that window size updates are able to atomically affect all known streams.
+                        s.http2Stream.Initialize(s.thisRef._nextStream, _initialWindowSize);
 
-                        // Copy the HEADERS frame.
-                        FrameHeader.WriteTo(span, s.current.Length, FrameType.Headers, s.flags, s.http2Stream.StreamId);
+                        // Client-initiated streams are always odd-numbered, so increase by 2.
+                        s.thisRef._nextStream += 2;
+
+                        // We're about to flush the HEADERS frame, so add the stream to the dictionary now.
+                        // The lifetime of the stream is now controlled by the stream itself and the connection.
+                        // This can fail if the connection is shutting down, in which case we will cancel sending this frame.
+                        s.thisRef._httpStreams.Add(s.http2Stream.StreamId, s.http2Stream);
+                    }
+
+                    Span<byte> span = writeBuffer.Span;
+
+                    // Copy the HEADERS frame.
+                    FrameHeader.WriteTo(span, s.current.Length, FrameType.Headers, s.flags, s.http2Stream.StreamId);
+                    span = span.Slice(FrameHeader.Size);
+                    s.current.Span.CopyTo(span);
+                    span = span.Slice(s.current.Length);
+                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote HEADERS frame. Length={s.current.Length}, flags={s.flags}");
+
+                    // Copy CONTINUATION frames, if any.
+                    while (s.remaining.Length > 0)
+                    {
+                        (s.current, s.remaining) = SplitBuffer(s.remaining, FrameHeader.MaxPayloadLength);
+                        s.flags = s.remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None;
+
+                        FrameHeader.WriteTo(span, s.current.Length, FrameType.Continuation, s.flags, s.http2Stream.StreamId);
                         span = span.Slice(FrameHeader.Size);
                         s.current.Span.CopyTo(span);
                         span = span.Slice(s.current.Length);
-                        if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote HEADERS frame. Length={s.current.Length}, flags={s.flags}");
-
-                        // Copy CONTINUATION frames, if any.
-                        while (s.remaining.Length > 0)
-                        {
-                            (s.current, s.remaining) = SplitBuffer(s.remaining, FrameHeader.MaxPayloadLength);
-                            s.flags = s.remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None;
-
-                            FrameHeader.WriteTo(span, s.current.Length, FrameType.Continuation, s.flags, s.http2Stream.StreamId);
-                            span = span.Slice(FrameHeader.Size);
-                            s.current.Span.CopyTo(span);
-                            span = span.Slice(s.current.Length);
-                            if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote CONTINUATION frame. Length={s.current.Length}, flags={s.flags}");
-                        }
-
-                        Debug.Assert(span.Length == 0);
-
-                        return s.mustFlush || (s.flags & FrameFlags.EndStream) != 0 ? FlushTiming.AfterPendingWrites : FlushTiming.Eventually;
+                        if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote CONTINUATION frame. Length={s.current.Length}, flags={s.flags}");
                     }
-                    catch
-                    {
-                        s.thisRef.EndWrite(forceFlush: false);
-                        throw;
-                    }
+
+                    Debug.Assert(span.Length == 0);
+
+                    return s.mustFlush || (s.flags & FrameFlags.EndStream) != 0 ? FlushTiming.AfterPendingWrites : FlushTiming.Eventually;
                 }, cancellationToken).ConfigureAwait(false);
                 return http2Stream;
             }
