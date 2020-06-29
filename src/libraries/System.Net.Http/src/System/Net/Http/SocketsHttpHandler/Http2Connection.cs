@@ -836,7 +836,14 @@ namespace System.Net.Http
 
                 if (waitForSignal is not null)
                 {
-                    // Nothing in the queue. Wait for work to be added.
+                    // Nothing left in the queue to process.
+                    // Flush the write buffer if we need to.
+                    if (_lastPendingWriterShouldFlush)
+                    {
+                        await FlushOutgoingBytesAsync().ConfigureAwait(false);
+                    }
+
+                    // Wait for work to be added.
                     await waitForSignal.ConfigureAwait(false);
 
 #if DEBUG
@@ -887,7 +894,7 @@ namespace System.Net.Http
             // Flush waiting state, then invoke the supplied action.
 
             // For now, this logic never executes...
-            Debug.Assert(_outgoingBuffer.ActiveLength == 0);
+//            Debug.Assert(_outgoingBuffer.ActiveLength == 0);
 
             // If the buffer has already grown to 32k, does not have room for the next request,
             // and is non-empty, flush the current contents to the wire.
@@ -907,7 +914,7 @@ namespace System.Net.Http
             _outgoingBuffer.EnsureAvailableSpace(writeBytes);
 
             bool forceFlush = false;
-            try
+//            try
             {
                 // NOTE: lockedAction can only fail in the HEADERS case, when we are unable to allocate a new streamID,
                 // either because we're run out or we've received a GOAWAY.
@@ -919,13 +926,21 @@ namespace System.Net.Http
                 _outgoingBuffer.Commit(writeBytes);
                 _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
                 forceFlush = flush == FlushTiming.Now;
+
+                // TODO: Experiment with removing forceFlush
+                if (forceFlush)
+                {
+                    await FlushOutgoingBytesAsync().ConfigureAwait(false);
+                }
             }
+#if false
             finally
             {
                 // Note for now we still need to do this in the exception case because
                 // that case is when header write fails, and it doesn't kill the connection
                 await FlushOutgoingBytesAsync().ConfigureAwait(false);
             }
+#endif
         }
 
 #if false
