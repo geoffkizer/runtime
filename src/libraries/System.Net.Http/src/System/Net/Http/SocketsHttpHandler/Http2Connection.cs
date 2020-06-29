@@ -989,6 +989,8 @@ namespace System.Net.Http
             // We can't validate that we hold the mutex, but we can at least validate that someone is holding it.
             Debug.Assert(_writerLock.IsHeld);
 
+            Debug.Assert(_pendingWriters == 0);
+
             // We must flush if the caller requires it or if this or a recent frame wanted to be flushed
             // once there were no more pending writers that themselves could have forced the flush.
             if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
