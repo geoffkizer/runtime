@@ -58,12 +58,6 @@ namespace System.Net.Http
         // This will be set when a connection IO error occurs
         private Exception? _abortException;
 
-        // If an in-progress write is canceled we need to be able to immediately
-        // report a cancellation to the user, but also block the connection until
-        // the write completes. We avoid actually canceling the write, as we would
-        // then have to close the whole connection.
-        private Task? _inProgressWrite = null;
-
         private const int MaxStreamId = int.MaxValue;
 
         private static readonly byte[] s_http2ConnectionPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
@@ -892,12 +886,8 @@ namespace System.Net.Http
 
             // Flush waiting state, then invoke the supplied action.
 
-            // If there is a pending write that was canceled while in progress, wait for it to complete.
-            if (_inProgressWrite != null)
-            {
-                await new ValueTask(_inProgressWrite).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
-                _inProgressWrite = null;
-            }
+            // For now, this logic never executes...
+            Debug.Assert(_outgoingBuffer.ActiveLength == 0);
 
             // If the buffer has already grown to 32k, does not have room for the next request,
             // and is non-empty, flush the current contents to the wire.
@@ -909,7 +899,7 @@ namespace System.Net.Http
                 if (writeBytes >= totalBufferLength - activeBufferLength)
                 {
                     // We explicitly do not pass cancellationToken here, as this flush impacts more than just this operation.
-                    await new ValueTask(FlushOutgoingBytesAsync()).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
+                    await FlushOutgoingBytesAsync().ConfigureAwait(false);
                 }
             }
 
@@ -932,10 +922,13 @@ namespace System.Net.Http
             }
             finally
             {
-                EndWrite(forceFlush);
+                // Note for now we still need to do this in the exception case because
+                // that case is when header write fails, and it doesn't kill the connection
+                await FlushOutgoingBytesAsync().ConfigureAwait(false);
             }
         }
 
+#if false
         private void EndWrite(bool forceFlush)
         {
             // Currently we always flush. Change this.
@@ -944,13 +937,14 @@ namespace System.Net.Http
             // once there were no more pending writers that themselves could have forced the flush.
 //            if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
             {
-                Debug.Assert(_inProgressWrite == null);
+//                Debug.Assert(_inProgressWrite == null);
 //                if (_outgoingBuffer.ActiveLength > 0)
                 {
-                    _inProgressWrite = FlushOutgoingBytesAsync();
+//                    _inProgressWrite = FlushOutgoingBytesAsync();
                 }
             }
         }
+#endif
 
         private Task SendSettingsAckAsync() =>
             PerformWriteAsync(FrameHeader.Size, this, (thisRef, writeBuffer) =>
