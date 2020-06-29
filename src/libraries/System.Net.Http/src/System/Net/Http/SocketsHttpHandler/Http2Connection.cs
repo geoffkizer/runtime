@@ -34,7 +34,6 @@ namespace System.Net.Http
 
         private readonly Dictionary<int, Http2Stream> _httpStreams;
 
-        private readonly AsyncMutex _writerLock;
         private readonly CreditManager _connectionWindow;
         private readonly CreditManager _concurrentStreams;
 
@@ -44,7 +43,6 @@ namespace System.Net.Http
         private int _maxConcurrentStreams;
         private int _pendingWindowUpdate;
         private long _idleSinceTickCount;
-        private int _pendingWriters;
         private bool _lastPendingWriterShouldFlush;
 
         // This means that the pool has disposed us, but there may still be
@@ -108,7 +106,6 @@ namespace System.Net.Http
 
             _httpStreams = new Dictionary<int, Http2Stream>();
 
-            _writerLock = new AsyncMutex();
             _connectionWindow = new CreditManager(this, nameof(_connectionWindow), DefaultInitialWindowSize);
             _concurrentStreams = new CreditManager(this, nameof(_concurrentStreams), int.MaxValue);
 
@@ -863,7 +860,7 @@ namespace System.Net.Http
                     {
                         try
                         {
-                            await PerformWriteAsync2(writeEntry.WriteBytes, writeEntry.Action, writeEntry.CancellationToken).ConfigureAwait(false);
+                            await PerformWriteAsync2(writeEntry.WriteBytes, writeEntry.Action).ConfigureAwait(false);
 
                             writeEntry.CompletionSource.SetResult();
                         }
@@ -894,113 +891,68 @@ namespace System.Net.Http
         /// <param name="lockedAction">The action to be invoked while the writer lock is held and that actually writes the data to the provided buffer.</param>
         /// <param name="cancellationToken">The cancellation token to use while waiting.</param>
 #endif
-        private async Task PerformWriteAsync2(int writeBytes, Func<Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
+        private async Task PerformWriteAsync2(int writeBytes, Func<Memory<byte>, FlushTiming> lockedAction)
         {
             if (NetEventSource.IsEnabled) Trace($"{nameof(writeBytes)}={writeBytes}");
-
-            // Acquire the write lock
-            ValueTask acquireLockTask = _writerLock.EnterAsync(cancellationToken);
-            if (acquireLockTask.IsCompletedSuccessfully)
-            {
-                acquireLockTask.GetAwaiter().GetResult(); // to enable the value task sources to be pooled
-            }
-            else
-            {
-                Debug.Assert(cancellationToken.IsCancellationRequested);
-                Interlocked.Increment(ref _pendingWriters);
-                try
-                {
-                    await acquireLockTask.ConfigureAwait(false);
-                }
-                catch
-                {
-                    if (Interlocked.Decrement(ref _pendingWriters) == 0)
-                    {
-                        // If a pending waiter is canceled, we may end up in a situation where a previously written frame
-                        // saw that there were pending writers and as such deferred its flush to them, but if/when that pending
-                        // writer is canceled, nothing may end up flushing the deferred work (at least not promptly).  To compensate,
-                        // if a pending writer does end up being canceled, we flush asynchronously.  We can't check whether there's such
-                        // a pending operation because we failed to acquire the lock that protects that state.  But we can at least only
-                        // do the flush if our decrement caused the pending count to reach 0: if it's still higher than zero, then there's
-                        // at least one other pending writer who can handle the flush.  Worst case, we pay for a flush that ends up being
-                        // a nop.  Note: we explicitly do not pass in the cancellationToken; if we're here, it's almost certainly because
-                        // cancellation was requested, and it's because of that cancellation that we need to flush.
-                        LogExceptions(FlushAsync(cancellationToken: default));
-                    }
-
-                    throw;
-                }
-                Interlocked.Decrement(ref _pendingWriters);
-            }
 
             // If the connection has been aborted, then fail now instead of trying to send more data.
             if (_abortException != null)
             {
-                _writerLock.Exit();
                 ThrowRequestAborted(_abortException);
             }
 
             // Flush waiting state, then invoke the supplied action.
+
+            // If there is a pending write that was canceled while in progress, wait for it to complete.
+            if (_inProgressWrite != null)
+            {
+                await new ValueTask(_inProgressWrite).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
+                _inProgressWrite = null;
+            }
+
+            // If the buffer has already grown to 32k, does not have room for the next request,
+            // and is non-empty, flush the current contents to the wire.
+            int totalBufferLength = _outgoingBuffer.Capacity;
+            if (totalBufferLength >= UnflushedOutgoingBufferSize)
+            {
+                int activeBufferLength = _outgoingBuffer.ActiveLength;
+                if (writeBytes >= totalBufferLength - activeBufferLength && activeBufferLength > 0)
+                {
+                    // We explicitly do not pass cancellationToken here, as this flush impacts more than just this operation.
+                    await new ValueTask(FlushOutgoingBytesAsync()).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
+                }
+            }
+
+            // Invoke the callback with the supplied state and the target write buffer.
+            _outgoingBuffer.EnsureAvailableSpace(writeBytes);
+
+            bool forceFlush = false;
             try
             {
-                // If there is a pending write that was canceled while in progress, wait for it to complete.
-                if (_inProgressWrite != null)
-                {
-                    await new ValueTask(_inProgressWrite).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
-                    _inProgressWrite = null;
-                }
+                // NOTE: lockedAction can only fail in the HEADERS case, when we are unable to allocate a new streamID,
+                // either because we're run out or we've received a GOAWAY.
+                // Eventually I'll need to move the streamID allocation logic here, but for now, just catch the exception
+                // so we can do the appropriate EndWrite here instead of in the caller
 
-                // If the buffer has already grown to 32k, does not have room for the next request,
-                // and is non-empty, flush the current contents to the wire.
-                int totalBufferLength = _outgoingBuffer.Capacity;
-                if (totalBufferLength >= UnflushedOutgoingBufferSize)
-                {
-                    int activeBufferLength = _outgoingBuffer.ActiveLength;
-                    if (writeBytes >= totalBufferLength - activeBufferLength && activeBufferLength > 0)
-                    {
-                        // We explicitly do not pass cancellationToken here, as this flush impacts more than just this operation.
-                        await new ValueTask(FlushOutgoingBytesAsync()).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
-                    }
-                }
+                FlushTiming flush = lockedAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
 
-                // Invoke the callback with the supplied state and the target write buffer.
-                _outgoingBuffer.EnsureAvailableSpace(writeBytes);
-
-                bool forceFlush = false;
-                try
-                {
-                    // NOTE: lockedAction can only fail in the HEADERS case, when we are unable to allocate a new streamID,
-                    // either because we're run out or we've received a GOAWAY.
-                    // Eventually I'll need to move the streamID allocation logic here, but for now, just catch the exception
-                    // so we can do the appropriate EndWrite here instead of in the caller
-
-                    FlushTiming flush = lockedAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
-
-                    _outgoingBuffer.Commit(writeBytes);
-                    _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
-                    forceFlush = flush == FlushTiming.Now;
-                }
-                finally
-                {
-                    EndWrite(forceFlush);
-                }
+                _outgoingBuffer.Commit(writeBytes);
+                _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
+                forceFlush = flush == FlushTiming.Now;
             }
             finally
             {
-                _writerLock.Exit();
+                EndWrite(forceFlush);
             }
         }
 
         private void EndWrite(bool forceFlush)
         {
-            // We can't validate that we hold the mutex, but we can at least validate that someone is holding it.
-            Debug.Assert(_writerLock.IsHeld);
-
-            Debug.Assert(_pendingWriters == 0);
+            // Currently we always flush. Change this.
 
             // We must flush if the caller requires it or if this or a recent frame wanted to be flushed
             // once there were no more pending writers that themselves could have forced the flush.
-            if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
+//            if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
             {
                 Debug.Assert(_inProgressWrite == null);
                 if (_outgoingBuffer.ActiveLength > 0)
