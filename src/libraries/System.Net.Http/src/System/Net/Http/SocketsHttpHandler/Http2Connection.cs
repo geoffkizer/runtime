@@ -924,7 +924,8 @@ namespace System.Net.Http
             // TODO: Experiment with removing forceFlush
             if (flush == FlushTiming.Now)
             {
-                await FlushOutgoingBytesAsync().ConfigureAwait(false);
+                //                await FlushOutgoingBytesAsync().ConfigureAwait(false);
+                _lastPendingWriterShouldFlush = true;
             }
         }
 
