@@ -155,21 +155,23 @@ namespace System.Net.Http
         private async Task FlushOutgoingBytesAsync()
         {
             if (NetEventSource.IsEnabled) Trace($"{nameof(_outgoingBuffer.ActiveLength)}={_outgoingBuffer.ActiveLength}");
-            Debug.Assert(_outgoingBuffer.ActiveLength > 0);
 
-            try
+            if (_outgoingBuffer.ActiveLength > 0)
             {
-                await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
-            }
-            catch (Exception e)
-            {
-                Abort(e);
-                throw;
-            }
-            finally
-            {
-                _lastPendingWriterShouldFlush = false;
-                _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
+                try
+                {
+                    await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Abort(e);
+                    throw;
+                }
+                finally
+                {
+                    _lastPendingWriterShouldFlush = false;
+                    _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
+                }
             }
         }
 
@@ -903,7 +905,8 @@ namespace System.Net.Http
             if (totalBufferLength >= UnflushedOutgoingBufferSize)
             {
                 int activeBufferLength = _outgoingBuffer.ActiveLength;
-                if (writeBytes >= totalBufferLength - activeBufferLength && activeBufferLength > 0)
+//                if (writeBytes >= totalBufferLength - activeBufferLength && activeBufferLength > 0)
+                if (writeBytes >= totalBufferLength - activeBufferLength)
                 {
                     // We explicitly do not pass cancellationToken here, as this flush impacts more than just this operation.
                     await new ValueTask(FlushOutgoingBytesAsync()).ConfigureAwait(false); // await ValueTask to minimize number of awaiter fields
@@ -942,7 +945,7 @@ namespace System.Net.Http
 //            if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
             {
                 Debug.Assert(_inProgressWrite == null);
-                if (_outgoingBuffer.ActiveLength > 0)
+//                if (_outgoingBuffer.ActiveLength > 0)
                 {
                     _inProgressWrite = FlushOutgoingBytesAsync();
                 }
