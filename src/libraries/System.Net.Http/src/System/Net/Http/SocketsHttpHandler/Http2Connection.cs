@@ -884,22 +884,9 @@ namespace System.Net.Http
             }
         }
 
-#if false
-        /// <summary>Performs a write operation serialized via the <see cref="_writerLock"/>.</summary>
-        /// <param name="writeBytes">The number of bytes to be written.</param>
-        /// <param name="state">The state to pass through to the callbacks.</param>
-        /// <param name="lockedAction">The action to be invoked while the writer lock is held and that actually writes the data to the provided buffer.</param>
-        /// <param name="cancellationToken">The cancellation token to use while waiting.</param>
-#endif
         private async Task PerformWriteAsync2(int writeBytes, Func<Memory<byte>, FlushTiming> lockedAction)
         {
             if (NetEventSource.IsEnabled) Trace($"{nameof(writeBytes)}={writeBytes}");
-
-            // If the connection has been aborted, then fail now instead of trying to send more data.
-            if (_abortException != null)
-            {
-                ThrowRequestAborted(_abortException);
-            }
 
             // Flush waiting state, then invoke the supplied action.
 
