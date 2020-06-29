@@ -159,7 +159,7 @@ namespace System.Net.Http
                 catch (Exception e)
                 {
                     Abort(e);
-                    throw;
+//                    throw;
                 }
                 finally
                 {
