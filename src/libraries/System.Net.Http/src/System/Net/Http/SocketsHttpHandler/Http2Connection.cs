@@ -869,6 +869,9 @@ namespace System.Net.Http
                         }
                         catch (Exception e)
                         {
+                            // NOTE: the write action can only fail in the HEADERS case, when we are unable to allocate a new streamID,
+                            // either because we're run out or we've received a GOAWAY.
+                            // Eventually I'll need to move the streamID allocation logic here...
                             writeEntry.CompletionSource.SetException(e);
                         }
                     }
@@ -882,7 +885,14 @@ namespace System.Net.Http
 
                 while (_writeQueue.TryDequeue(out WriteQueueEntry writeEntry))
                 {
-                    writeEntry.CompletionSource.SetException(_abortException);
+                    if (writeEntry.CancellationToken.IsCancellationRequested)
+                    {
+                        writeEntry.CompletionSource.SetCanceled(writeEntry.CancellationToken);
+                    }
+                    else
+                    {
+                        writeEntry.CompletionSource.SetException(_abortException);
+                    }
                 }
             }
         }
@@ -891,75 +901,32 @@ namespace System.Net.Http
         {
             if (NetEventSource.IsEnabled) Trace($"{nameof(writeBytes)}={writeBytes}");
 
-            // Flush waiting state, then invoke the supplied action.
-
-            // For now, this logic never executes...
-//            Debug.Assert(_outgoingBuffer.ActiveLength == 0);
-
             // If the buffer has already grown to 32k, does not have room for the next request,
             // and is non-empty, flush the current contents to the wire.
             int totalBufferLength = _outgoingBuffer.Capacity;
             if (totalBufferLength >= UnflushedOutgoingBufferSize)
             {
                 int activeBufferLength = _outgoingBuffer.ActiveLength;
-//                if (writeBytes >= totalBufferLength - activeBufferLength && activeBufferLength > 0)
                 if (writeBytes >= totalBufferLength - activeBufferLength)
                 {
-                    // We explicitly do not pass cancellationToken here, as this flush impacts more than just this operation.
                     await FlushOutgoingBytesAsync().ConfigureAwait(false);
                 }
             }
 
-            // Invoke the callback with the supplied state and the target write buffer.
             _outgoingBuffer.EnsureAvailableSpace(writeBytes);
 
-            bool forceFlush = false;
-//            try
+            // Invoke the callback with the supplied state and the target write buffer.
+            FlushTiming flush = lockedAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
+
+            _outgoingBuffer.Commit(writeBytes);
+            _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
+
+            // TODO: Experiment with removing forceFlush
+            if (flush == FlushTiming.Now)
             {
-                // NOTE: lockedAction can only fail in the HEADERS case, when we are unable to allocate a new streamID,
-                // either because we're run out or we've received a GOAWAY.
-                // Eventually I'll need to move the streamID allocation logic here, but for now, just catch the exception
-                // so we can do the appropriate EndWrite here instead of in the caller
-
-                FlushTiming flush = lockedAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
-
-                _outgoingBuffer.Commit(writeBytes);
-                _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
-                forceFlush = flush == FlushTiming.Now;
-
-                // TODO: Experiment with removing forceFlush
-                if (forceFlush)
-                {
-                    await FlushOutgoingBytesAsync().ConfigureAwait(false);
-                }
-            }
-#if false
-            finally
-            {
-                // Note for now we still need to do this in the exception case because
-                // that case is when header write fails, and it doesn't kill the connection
                 await FlushOutgoingBytesAsync().ConfigureAwait(false);
             }
-#endif
         }
-
-#if false
-        private void EndWrite(bool forceFlush)
-        {
-            // Currently we always flush. Change this.
-
-            // We must flush if the caller requires it or if this or a recent frame wanted to be flushed
-            // once there were no more pending writers that themselves could have forced the flush.
-//            if (forceFlush || (_pendingWriters == 0 && _lastPendingWriterShouldFlush))
-            {
-//                Debug.Assert(_inProgressWrite == null);
-//                if (_outgoingBuffer.ActiveLength > 0)
-                {
-//                    _inProgressWrite = FlushOutgoingBytesAsync();
-                }
-            }
-        }
-#endif
 
         private Task SendSettingsAckAsync() =>
             PerformWriteAsync(FrameHeader.Size, this, (thisRef, writeBuffer) =>
