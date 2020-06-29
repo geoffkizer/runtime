@@ -152,6 +152,7 @@ namespace System.Net.Http
             _expectingSettingsAck = true;
 
             _ = ProcessIncomingFramesAsync();
+            _ = ProcessOutgoingFramesAsync();
         }
 
         private async Task FlushOutgoingBytesAsync()
@@ -769,12 +770,114 @@ namespace System.Net.Http
         internal Task FlushAsync(CancellationToken cancellationToken) =>
             PerformWriteAsync(0, 0, (_, __) => FlushTiming.Now, cancellationToken);
 
+        // TODO: Move
+        private struct WriteQueueEntry
+        {
+            public Func<Memory<byte>, FlushTiming> Action;
+            public int WriteBytes;
+            public CancellationToken CancellationToken;
+            public TaskCompletionSource CompletionSource;
+        }
+
+        private Queue<WriteQueueEntry> _writeQueue = new Queue<WriteQueueEntry>();
+
+        private TaskCompletionSource? _writeSignal;
 
         private Task PerformWriteAsync<T>(int writeBytes, T state, Func<T, Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
         {
             // Lame, but temporary
             Func<Memory<byte>, FlushTiming> a = buf => lockedAction(state, buf);
-            return PerformWriteAsync2(writeBytes, a, cancellationToken);
+
+            TaskCompletionSource source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            WriteQueueEntry writeEntry = new WriteQueueEntry
+            {
+                WriteBytes = writeBytes,
+                Action = a,
+                CancellationToken = cancellationToken,
+                CompletionSource = source,
+            };
+
+            lock (SyncObject)
+            {
+                if (_abortException is not null)
+                {
+                    ThrowRequestAborted(_abortException);
+                }
+
+                _writeQueue.Enqueue(writeEntry);
+
+                if (_writeSignal is not null)
+                {
+                    _writeSignal.SetResult();
+                    _writeSignal = null;
+                }
+            }
+
+            return source.Task;
+        }
+
+        private async Task ProcessOutgoingFramesAsync()
+        {
+            while (true)
+            {
+                WriteQueueEntry writeEntry;
+                Task? waitForSignal = null;
+
+                lock (SyncObject)
+                {
+                    Debug.Assert(_writeSignal is null);
+
+                    if (_abortException is not null)
+                    {
+                        // Connection is aborting, so stop processing
+                        break;
+                    }
+
+                    if (!_writeQueue.TryDequeue(out writeEntry))
+                    {
+                        _writeSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        waitForSignal = _writeSignal.Task;
+                    }
+                }
+
+                if (waitForSignal is not null)
+                {
+                    // Nothing in the queue. Wait for work to be added.
+                    await waitForSignal.ConfigureAwait(false);
+
+#if DEBUG
+                    lock (SyncObject)
+                    {
+                        Debug.Assert(_abortException is not null || _writeQueue.Count > 0, "Write queue signalled but no work to do ??");
+                    }
+#endif
+                }
+                else
+                {
+                    try
+                    {
+                        await PerformWriteAsync2(writeEntry.WriteBytes, writeEntry.Action, writeEntry.CancellationToken).ConfigureAwait(false);
+
+                        writeEntry.CompletionSource.SetResult();
+                    }
+                    catch (Exception e)
+                    {
+                        writeEntry.CompletionSource.SetException(e);
+                    }
+                }
+            }
+
+            // Connection is aborting, so fail any outstanding writes.
+            lock (SyncObject)
+            {
+                Debug.Assert(_abortException is not null);
+
+                while (_writeQueue.TryDequeue(out WriteQueueEntry writeEntry))
+                {
+                    writeEntry.CompletionSource.SetException(_abortException);
+                }
+            }
         }
 
 #if false
@@ -796,6 +899,7 @@ namespace System.Net.Http
             }
             else
             {
+                Debug.Assert(cancellationToken.IsCancellationRequested);
                 Interlocked.Increment(ref _pendingWriters);
                 try
                 {
