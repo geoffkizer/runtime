@@ -769,12 +769,22 @@ namespace System.Net.Http
         internal Task FlushAsync(CancellationToken cancellationToken) =>
             PerformWriteAsync(0, 0, (_, __) => FlushTiming.Now, cancellationToken);
 
+
+        private Task PerformWriteAsync<T>(int writeBytes, T state, Func<T, Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
+        {
+            // Lame, but temporary
+            Func<Memory<byte>, FlushTiming> a = buf => lockedAction(state, buf);
+            return PerformWriteAsync2(writeBytes, a, cancellationToken);
+        }
+
+#if false
         /// <summary>Performs a write operation serialized via the <see cref="_writerLock"/>.</summary>
         /// <param name="writeBytes">The number of bytes to be written.</param>
         /// <param name="state">The state to pass through to the callbacks.</param>
         /// <param name="lockedAction">The action to be invoked while the writer lock is held and that actually writes the data to the provided buffer.</param>
         /// <param name="cancellationToken">The cancellation token to use while waiting.</param>
-        private async Task PerformWriteAsync<T>(int writeBytes, T state, Func<T, Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
+#endif
+        private async Task PerformWriteAsync2(int writeBytes, Func<Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
         {
             if (NetEventSource.IsEnabled) Trace($"{nameof(writeBytes)}={writeBytes}");
 
@@ -853,7 +863,7 @@ namespace System.Net.Http
                     // Eventually I'll need to move the streamID allocation logic here, but for now, just catch the exception
                     // so we can do the appropriate EndWrite here instead of in the caller
 
-                    FlushTiming flush = lockedAction(state, _outgoingBuffer.AvailableMemorySliced(writeBytes));
+                    FlushTiming flush = lockedAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
 
                     _outgoingBuffer.Commit(writeBytes);
                     _lastPendingWriterShouldFlush |= flush == FlushTiming.AfterPendingWrites;
