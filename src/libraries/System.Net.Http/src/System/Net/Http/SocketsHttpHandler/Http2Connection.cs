@@ -855,15 +855,22 @@ namespace System.Net.Http
                 }
                 else
                 {
-                    try
+                    if (writeEntry.CancellationToken.IsCancellationRequested)
                     {
-                        await PerformWriteAsync2(writeEntry.WriteBytes, writeEntry.Action, writeEntry.CancellationToken).ConfigureAwait(false);
-
-                        writeEntry.CompletionSource.SetResult();
+                        writeEntry.CompletionSource.SetCanceled(writeEntry.CancellationToken);
                     }
-                    catch (Exception e)
+                    else
                     {
-                        writeEntry.CompletionSource.SetException(e);
+                        try
+                        {
+                            await PerformWriteAsync2(writeEntry.WriteBytes, writeEntry.Action, writeEntry.CancellationToken).ConfigureAwait(false);
+
+                            writeEntry.CompletionSource.SetResult();
+                        }
+                        catch (Exception e)
+                        {
+                            writeEntry.CompletionSource.SetException(e);
+                        }
                     }
                 }
             }
