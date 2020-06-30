@@ -38,6 +38,8 @@ namespace System.Net.Http
 
         public ValueTask<int> RequestCreditAsync(int amount, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             lock (SyncObject)
             {
                 if (_disposed)
