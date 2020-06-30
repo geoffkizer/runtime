@@ -778,6 +778,7 @@ namespace System.Net.Http
 
         private Task PerformWriteAsync<T>(int writeBytes, T state, Func<T, Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
         {
+            // NOTE: I'd like to remove cancellationToken here entirely, but some tests fail if the following isn't present.
             cancellationToken.ThrowIfCancellationRequested();
 
             // Lame, but temporary
