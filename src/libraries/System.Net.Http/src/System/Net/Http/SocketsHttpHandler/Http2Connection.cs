@@ -768,7 +768,7 @@ namespace System.Net.Http
         {
             public Func<Memory<byte>, FlushTiming> Action;
             public int WriteBytes;
-            public CancellationToken CancellationToken;
+//            public CancellationToken CancellationToken;
             public TaskCompletionSource CompletionSource;
         }
 
@@ -778,6 +778,8 @@ namespace System.Net.Http
 
         private Task PerformWriteAsync<T>(int writeBytes, T state, Func<T, Memory<byte>, FlushTiming> lockedAction, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Lame, but temporary
             Func<Memory<byte>, FlushTiming> a = buf => lockedAction(state, buf);
 
@@ -787,7 +789,7 @@ namespace System.Net.Http
             {
                 WriteBytes = writeBytes,
                 Action = a,
-                CancellationToken = cancellationToken,
+//                CancellationToken = cancellationToken,
                 CompletionSource = source,
             };
 
@@ -855,11 +857,13 @@ namespace System.Net.Http
                 }
                 else
                 {
+#if false
                     if (writeEntry.CancellationToken.IsCancellationRequested)
                     {
                         writeEntry.CompletionSource.SetCanceled(writeEntry.CancellationToken);
                     }
                     else
+#endif
                     {
                         try
                         {
@@ -885,11 +889,13 @@ namespace System.Net.Http
 
                 while (_writeQueue.TryDequeue(out WriteQueueEntry writeEntry))
                 {
+#if false
                     if (writeEntry.CancellationToken.IsCancellationRequested)
                     {
                         writeEntry.CompletionSource.SetCanceled(writeEntry.CancellationToken);
                     }
                     else
+#endif
                     {
                         writeEntry.CompletionSource.SetException(_abortException);
                     }
