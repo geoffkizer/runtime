@@ -1221,15 +1221,12 @@ namespace System.Net.Http
                 // before taking the write lock.
                 headerBuffer = new ArrayBuffer(InitialConnectionBufferSize, usePool: true);
                 WriteHeaders(request, ref headerBuffer);
-                ReadOnlyMemory<byte> remaining = headerBuffer.ActiveMemory;
-                Debug.Assert(remaining.Length > 0);
+                ReadOnlyMemory<byte> headerBytes = headerBuffer.ActiveMemory;
+                Debug.Assert(headerBytes.Length > 0);
 
                 // Calculate the total number of bytes we're going to use (content + headers).
-                int frameCount = ((remaining.Length - 1) / FrameHeader.MaxPayloadLength) + 1;
-                int totalSize = remaining.Length + (frameCount * FrameHeader.Size);
-
-                ReadOnlyMemory<byte> current;
-                (current, remaining) = SplitBuffer(remaining, FrameHeader.MaxPayloadLength);
+                int frameCount = ((headerBytes.Length - 1) / FrameHeader.MaxPayloadLength) + 1;
+                int totalSize = headerBytes.Length + (frameCount * FrameHeader.Size);
 
                 // Construct and initialize the new Http2Stream instance.  It's stream ID must be set below
                 // before the instance is used and stored into the dictionary.  However, we construct it here
@@ -1239,9 +1236,9 @@ namespace System.Net.Http
                 // Start the write.  This serializes access to write to the connection, and ensures that HEADERS
                 // and CONTINUATION frames stay together, as they must do. We use the lock as well to ensure new
                 // streams are created and started in order.
-                await PerformWriteAsync(totalSize, (thisRef: this, http2Stream, current, remaining, endStream: (request.Content == null), mustFlush), (s, writeBuffer) =>
+                await PerformWriteAsync(totalSize, (thisRef: this, http2Stream, headerBytes, endStream: (request.Content == null), mustFlush), (s, writeBuffer) =>
                 {
-                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Started writing. Total header bytes={remaining.Length}");
+                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Started writing. Total header bytes={headerBytes.Length}");
 
                     // Allocate the next available stream ID. Note that if we fail before sending the headers,
                     // we'll just skip this stream ID, which is fine.
@@ -1273,25 +1270,27 @@ namespace System.Net.Http
                     Span<byte> span = writeBuffer.Span;
 
                     // Copy the HEADERS frame.
-                    FrameFlags flags = (s.remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None);
+                    ReadOnlyMemory<byte> current, remaining;
+                    (current, remaining) = SplitBuffer(headerBytes, FrameHeader.MaxPayloadLength);
+                    FrameFlags flags = (remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None);
                     flags |= (s.endStream ? FrameFlags.EndStream : FrameFlags.None);
-                    FrameHeader.WriteTo(span, s.current.Length, FrameType.Headers, flags, s.http2Stream.StreamId);
+                    FrameHeader.WriteTo(span, current.Length, FrameType.Headers, flags, s.http2Stream.StreamId);
                     span = span.Slice(FrameHeader.Size);
-                    s.current.Span.CopyTo(span);
-                    span = span.Slice(s.current.Length);
-                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote HEADERS frame. Length={s.current.Length}, flags={flags}");
+                    current.Span.CopyTo(span);
+                    span = span.Slice(current.Length);
+                    if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote HEADERS frame. Length={current.Length}, flags={flags}");
 
                     // Copy CONTINUATION frames, if any.
-                    while (s.remaining.Length > 0)
+                    while (remaining.Length > 0)
                     {
-                        (s.current, s.remaining) = SplitBuffer(s.remaining, FrameHeader.MaxPayloadLength);
-                        flags = s.remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None;
+                        (current, remaining) = SplitBuffer(remaining, FrameHeader.MaxPayloadLength);
+                        flags = remaining.Length == 0 ? FrameFlags.EndHeaders : FrameFlags.None;
 
-                        FrameHeader.WriteTo(span, s.current.Length, FrameType.Continuation, flags, s.http2Stream.StreamId);
+                        FrameHeader.WriteTo(span, current.Length, FrameType.Continuation, flags, s.http2Stream.StreamId);
                         span = span.Slice(FrameHeader.Size);
-                        s.current.Span.CopyTo(span);
-                        span = span.Slice(s.current.Length);
-                        if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote CONTINUATION frame. Length={s.current.Length}, flags={flags}");
+                        current.Span.CopyTo(span);
+                        span = span.Slice(current.Length);
+                        if (NetEventSource.IsEnabled) s.thisRef.Trace(s.http2Stream.StreamId, $"Wrote CONTINUATION frame. Length={current.Length}, flags={flags}");
                     }
 
                     Debug.Assert(span.Length == 0);
