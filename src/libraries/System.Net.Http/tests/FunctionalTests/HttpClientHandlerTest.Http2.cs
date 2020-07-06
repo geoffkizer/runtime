@@ -1420,6 +1420,111 @@ namespace System.Net.Http.Functional.Tests
 
         [OuterLoop("Uses Task.Delay")]
         [ConditionalFact(nameof(SupportsAlpn))]
+        public async Task Http2_InitialWindowSizeChangedWhileWaitingForConnectionCredit_ClientDoesNotExceedWindows()
+        {
+            const int DefaultInitialWindowSize = 65535;
+            const int ContentSize = DefaultInitialWindowSize + 1000;
+
+            var content = new ByteAtATimeContent(ContentSize);
+
+            using (Http2LoopbackServer server = Http2LoopbackServer.CreateServer())
+            using (HttpClient client = CreateHttpClient())
+            {
+                Task<HttpResponseMessage> clientTask = client.PostAsync(server.Address, content);
+
+                Http2LoopbackConnection connection = await server.EstablishConnectionAsync();
+
+                Frame frame = await connection.ReadFrameAsync(TimeSpan.FromSeconds(30));
+                int streamId = frame.StreamId;
+                Assert.Equal(FrameType.Headers, frame.Type);
+                Assert.Equal(FrameFlags.EndHeaders, frame.Flags);
+
+                // Receive up to initial window size
+                int bytesReceived = 0;
+                while (bytesReceived < DefaultInitialWindowSize)
+                {
+                    frame = await connection.ReadFrameAsync(TimeSpan.FromSeconds(30));
+                    Assert.Equal(streamId, frame.StreamId);
+                    Assert.Equal(FrameType.Data, frame.Type);
+                    Assert.Equal(FrameFlags.None, frame.Flags);
+                    Assert.True(frame.Length > 0);
+
+                    bytesReceived += frame.Length;
+                }
+
+                Assert.Equal(DefaultInitialWindowSize, bytesReceived);
+
+                // Issue another read. It shouldn't complete yet. Wait a brief period of time to ensure it doesn't complete.
+                Task<Frame> readFrameTask = connection.ReadFrameAsync(TimeSpan.FromSeconds(30));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Increase stream window by one. Still can't send because there's no connection credit available.
+                await connection.WriteFrameAsync(new WindowUpdateFrame(1, streamId));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Change SETTINGS_INITIAL_WINDOW_SIZE to 0. This will make the client's credit go negative.
+                await connection.ExpectSettingsAckAsync();
+                await connection.WriteFrameAsync(new SettingsFrame(new SettingsEntry { SettingId = SettingId.InitialWindowSize, Value = 0 }));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Increase connection window by one. Still shouldn't send because stream credit is now negative.
+                await connection.WriteFrameAsync(new WindowUpdateFrame(1, 0));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Increase stream window so client credit will be 0.
+                await connection.WriteFrameAsync(new WindowUpdateFrame(DefaultInitialWindowSize - 1, streamId));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Increase stream window by one, so client can now send a single byte.
+                await connection.WriteFrameAsync(new WindowUpdateFrame(1, streamId));
+
+                frame = await readFrameTask;
+                Assert.Equal(FrameType.Data, frame.Type);
+                Assert.Equal(1, frame.Length);
+                bytesReceived++;
+
+                // Issue another read and ensure it doesn't complete yet.
+                readFrameTask = connection.ReadFrameAsync(TimeSpan.FromSeconds(30));
+
+                await Task.Delay(500);
+                Assert.False(readFrameTask.IsCompleted);
+
+                // Increase both connection and stream windows so client can send the rest of the content.
+                await connection.WriteFrameAsync(new WindowUpdateFrame(ContentSize - (DefaultInitialWindowSize + 1), 0));
+                await connection.WriteFrameAsync(new WindowUpdateFrame(ContentSize - (DefaultInitialWindowSize + 1), streamId));
+
+                frame = await readFrameTask;
+                Assert.Equal(streamId, frame.StreamId);
+                Assert.Equal(FrameType.Data, frame.Type);
+                Assert.Equal(FrameFlags.None, frame.Flags);
+                Assert.True(frame.Length > 0);
+
+                bytesReceived += frame.Length;
+
+                // Read to end of stream
+                bytesReceived += await ReadToEndOfStream(connection, streamId);
+
+                Assert.Equal(ContentSize, bytesReceived);
+
+                await connection.SendDefaultResponseAsync(streamId);
+
+                HttpResponseMessage response = await clientTask;
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+        }
+
+        [OuterLoop("Uses Task.Delay")]
+        [ConditionalFact(nameof(SupportsAlpn))]
         public async Task Http2_MaxConcurrentStreams_LimitEnforced()
         {
             using (Http2LoopbackServer server = Http2LoopbackServer.CreateServer())
