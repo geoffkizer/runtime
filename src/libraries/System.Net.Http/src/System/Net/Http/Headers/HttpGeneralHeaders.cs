@@ -20,6 +20,8 @@ namespace System.Net.Http.Headers
         private readonly HttpHeaders _parent;
         private bool _transferEncodingChunkedSet;
         private bool _connectionCloseSet;
+        private DateTimeOffset? _dateValue;
+        private bool _isDateParsed;
 
         public CacheControlHeaderValue? CacheControl
         {
@@ -80,11 +82,35 @@ namespace System.Net.Http.Headers
             return null;
         }
 
+        // Read-cached version. Cache value on parse. Write-through to raw store on set.
         public DateTimeOffset? Date
         {
-            get { return HeaderUtilities.GetDateTimeOffsetValue(KnownHeaders.Date.Descriptor, _parent); }
-            set { _parent.SetOrRemoveParsedValue(KnownHeaders.Date.Descriptor, value); }
+            get
+            {
+                if (!_isDateParsed)
+                {
+                    _parent.ParseRawValueAndReturn(KnownHeaders.Date.Descriptor, DateHeaderParser.Parser, out _dateValue);
+                }
+
+                return _dateValue;
+            }
+            set
+            {
+                _parent.SetRawValueFromParsedValue(KnownHeaders.Date.Descriptor, DateHeaderParser.Parser, value);
+
+                _dateValue = value;
+                _isDateParsed = true;
+            }
         }
+
+#if false
+        // Uncached version. Re-parse on every access.
+        public DateTimeOffset? Date
+        {
+            get { _parent.TryParseRawValueAndReturn(KnownHeaders.Date.Descriptor, DateHeaderParser.Parser, out DateTimeOffset value) ? value : null; }
+            set { _parent.SetRawValueFromParsedValue(KnownHeaders.Date.Descriptor, DateHeaderParser.Parser, value); }
+        }
+#endif
 
         public HttpHeaderValueCollection<NameValueHeaderValue> Pragma
         {

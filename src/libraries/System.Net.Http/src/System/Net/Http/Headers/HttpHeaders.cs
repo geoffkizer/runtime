@@ -79,6 +79,11 @@ namespace System.Net.Http.Headers
 
         internal void Add(HeaderDescriptor descriptor, string? value)
         {
+            DoAdd(descriptor, value);
+        }
+
+        internal virtual void DoAdd(HeaderDescriptor descriptor, string? value)
+        {
             // We don't use GetOrCreateHeaderInfo() here, since this would create a new header in the store. If parsing
             // the value then throws, we would have to remove the header from the store again. So just get a
             // HeaderStoreItemInfo object and try to parse the value. If it works, we'll add the header.
@@ -1336,5 +1341,78 @@ namespace System.Net.Http.Headers
             internal bool IsEmpty => (RawValue == null) && (InvalidValue == null) && (ParsedValue == null);
         }
         #endregion
+
+        //
+        // Prototype code
+        // Only works with single-valued headers, for now
+        //
+
+        // This doesn't store the value in ParsedValues
+        internal bool ParseRawValueAndReturn<T>(HeaderDescriptor descriptor, HttpHeaderParser parser, out T? value)
+        {
+            if (!TryGetHeaderValue(descriptor, out object? storeValue))
+            {
+                value = default;
+                return false;
+            }
+
+            Debug.Assert(storeValue is string);
+            string rawValue = (string)storeValue;
+
+            int index = 0;
+            if (!parser.TryParseValue(rawValue, null, ref index, out object? parsedValue))
+            {
+                value = default;
+                return false;
+            }
+
+            // TODO: Do we need to check index here to ensure it parsed the entire value?
+
+            Debug.Assert(parsedValue is not null);
+            value = (T)parsedValue;
+            return true;
+        }
+
+        // This could just be a method on parser....
+        // TODO: Stuff like Add seems to allow null, is this intentional? What's supposed to happen when null is passed?
+        internal T ParseStringValue<T>(HttpHeaderParser parser, string value)
+        {
+            int index = 0;
+            return (T)parser.ParseValue(value, null, ref index);
+
+            // TODO: Do we need to check index here to ensure it parsed the entire value?
+        }
+
+
+        internal void SetRawValueFromParsedValue<T>(HeaderDescriptor descriptor, HttpHeaderParser parser, T value)
+        {
+            _headerStore ??= new Dictionary<HeaderDescriptor, object>();
+
+            if (value is null)
+            {
+                _headerStore.Remove(descriptor);
+            }
+            else
+            {
+                // TODO: Add generic support to parsers, so that we can call ToString without boxing.
+
+                string? rawValue = parser.ToString(value!);
+
+                // When can rawValue be null in this case?
+                Debug.Assert(rawValue != null);
+
+                if (_headerStore.TryGetValue(descriptor, out object? currentValue))
+                {
+                    // We only handle single values
+                    Debug.Assert(currentValue is string);
+                    _headerStore[descriptor] = rawValue;
+                }
+                else
+                {
+                    // The header store did not contain the header.
+                    _headerStore.Add(descriptor, rawValue);
+                }
+            }
+        }
     }
 }

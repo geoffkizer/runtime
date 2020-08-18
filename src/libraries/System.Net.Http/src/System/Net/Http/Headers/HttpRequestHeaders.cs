@@ -290,5 +290,22 @@ namespace System.Net.Http.Headers
         }
 
         private HttpGeneralHeaders GeneralHeaders => _generalHeaders ?? (_generalHeaders = new HttpGeneralHeaders(this));
+
+        //
+        // Prototype code
+        //
+
+        internal override void DoAdd(HeaderDescriptor descriptor, string? value)
+        {
+            if (descriptor.Equals(KnownHeaders.Date.Descriptor))
+            {
+                GeneralHeaders.Date = ParseStringValue<DateTime>(DateHeaderParser.Parser, value!);
+            }
+            else
+            {
+                base.DoAdd(descriptor, value);
+            }
+        }
+
     }
 }
