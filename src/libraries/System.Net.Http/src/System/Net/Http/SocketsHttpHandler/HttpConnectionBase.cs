@@ -90,7 +90,7 @@ namespace System.Net.Http
         }
 
         /// <summary>Awaits a task, ignoring any resulting exceptions.</summary>
-        internal static void IgnoreExceptions(ValueTask<int> task)
+        internal static void IgnoreExceptions(ValueTask task)
         {
             // Avoid TaskScheduler.UnobservedTaskException firing for any exceptions.
             if (task.IsCompleted)
