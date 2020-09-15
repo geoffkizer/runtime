@@ -25,7 +25,8 @@ namespace System.Net.Http
         private readonly Stream _stream;
 
         // NOTE: These are mutable structs; do not make these readonly.
-        private ArrayBuffer _incomingBuffer;
+        //private ArrayBuffer _incomingBuffer;
+        private SmartReadBufferStream _smartReadBuffer;
         private ArrayBuffer _outgoingBuffer;
 
         /// <summary>Reusable array used to get the values for each header being written to the wire.</summary>
@@ -121,7 +122,7 @@ namespace System.Net.Http
         {
             _pool = pool;
             _stream = stream;
-            _incomingBuffer = new ArrayBuffer(InitialConnectionBufferSize);
+            _smartReadBuffer = new SmartReadBufferStream(stream, InitialConnectionBufferSize);
             _outgoingBuffer = new ArrayBuffer(InitialConnectionBufferSize);
 
             _hpackDecoder = new HPackDecoder(maxHeadersLength: pool.Settings._maxResponseHeadersLength * 1024);
@@ -166,9 +167,9 @@ namespace System.Net.Http
 
         public bool CanAddNewStream => _concurrentStreams.IsCreditAvailable;
 
-        private ReadOnlyMemory<byte> ReadBuffer => _incomingBuffer.ActiveMemory;
+        private ReadOnlyMemory<byte> ReadBuffer => _smartReadBuffer.ReadBuffer;
 
-        private void ConsumeReadBuffer(int bytesConsumed) => _incomingBuffer.Discard(bytesConsumed);
+        private void ConsumeReadBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
         public async ValueTask SetupAsync()
         {
@@ -230,12 +231,15 @@ namespace System.Net.Http
             // Ensure we've read enough data for the frame header.
             if (ReadBuffer.Length < FrameHeader.Size)
             {
-                _incomingBuffer.EnsureAvailableSpace(FrameHeader.Size - ReadBuffer.Length);
                 do
                 {
-                    int bytesRead = await _stream.ReadAsync(_incomingBuffer.AvailableMemory).ConfigureAwait(false);
-                    _incomingBuffer.Commit(bytesRead);
-                    if (bytesRead == 0)
+                    // TODO: Be smarter about buffer capacity
+                    if (_smartReadBuffer.IsReadBufferFull)
+                    {
+                        _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferCapacity * 2);
+                    }
+
+                    if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
                     {
                         if (ReadBuffer.Length == 0)
                         {
@@ -268,12 +272,18 @@ namespace System.Net.Http
             // Ensure we've read the frame contents into our buffer.
             if (ReadBuffer.Length < frameHeader.PayloadLength)
             {
-                _incomingBuffer.EnsureAvailableSpace(frameHeader.PayloadLength - ReadBuffer.Length);
                 do
                 {
-                    int bytesRead = await _stream.ReadAsync(_incomingBuffer.AvailableMemory).ConfigureAwait(false);
-                    _incomingBuffer.Commit(bytesRead);
-                    if (bytesRead == 0) ThrowPrematureEOF(frameHeader.PayloadLength);
+                    // TODO: Be smarter about buffer capacity
+                    if (_smartReadBuffer.IsReadBufferFull)
+                    {
+                        _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferCapacity * 2);
+                    }
+
+                    if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
+                    {
+                        ThrowPrematureEOF(frameHeader.PayloadLength);
+                    }
                 }
                 while (ReadBuffer.Length < frameHeader.PayloadLength);
             }
