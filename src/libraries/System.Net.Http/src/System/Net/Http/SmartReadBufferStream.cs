@@ -4,15 +4,11 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace System.Net.Http
 {
-    // CONSIDER: Might simply to keep start/end instead of start/length
-    // CONSIDER: Calls to Read/ReadAsync with small buffers should read into read buffer instead
     internal sealed class SmartReadBufferStream : HttpBaseStream
     {
         private readonly Stream _innerStream;
@@ -168,18 +164,46 @@ namespace System.Net.Http
                 return bytesRead;
             }
 
+            if (buffer.Length < _readBufferCapacity)
+            {
+                if (ReadIntoBuffer())
+                {
+                    bytesRead = TryReadFromBuffer(buffer);
+                    Debug.Assert(bytesRead > 0);
+                    return bytesRead;
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+
             return _innerStream.Read(buffer);
         }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             int bytesRead = TryReadFromBuffer(buffer.Span);
             if (bytesRead > 0)
             {
-                return new ValueTask<int>(bytesRead);
+                return bytesRead;
             }
 
-            return _innerStream.ReadAsync(buffer, cancellationToken);
+            if (buffer.Length < _readBufferCapacity)
+            {
+                if (await ReadIntoBufferAsync().ConfigureAwait(false))
+                {
+                    bytesRead = TryReadFromBuffer(buffer.Span);
+                    Debug.Assert(bytesRead > 0);
+                    return bytesRead;
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+
+            return await _innerStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
