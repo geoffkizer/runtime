@@ -72,11 +72,11 @@ namespace System.Net.Http
             return new Memory<byte>(_readBuffer, _readLength, _readBufferCapacity - _readLength);
         }
 
-        public async ValueTask<bool> ReadIntoBufferAsync()
+        public async ValueTask<bool> ReadIntoBufferAsync(CancellationToken cancellationToken = default)
         {
             Memory<byte> availableReadBuffer = AdjustBufferForRead();
 
-            int bytesRead = await _innerStream.ReadAsync(availableReadBuffer).ConfigureAwait(false);
+            int bytesRead = await _innerStream.ReadAsync(availableReadBuffer, cancellationToken).ConfigureAwait(false);
             if (bytesRead == 0)
             {
                 return false;
@@ -191,7 +191,7 @@ namespace System.Net.Http
 
             if (buffer.Length < _readBufferCapacity)
             {
-                if (await ReadIntoBufferAsync().ConfigureAwait(false))
+                if (await ReadIntoBufferAsync(cancellationToken).ConfigureAwait(false))
                 {
                     bytesRead = TryReadFromBuffer(buffer.Span);
                     Debug.Assert(bytesRead > 0);
