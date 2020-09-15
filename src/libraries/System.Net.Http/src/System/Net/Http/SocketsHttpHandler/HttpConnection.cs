@@ -58,9 +58,7 @@ namespace System.Net.Http
 
         private ValueTask? _readAheadTask;
         private int _readAheadTaskLock; // 0 == free, 1 == held
-        private byte[] _readBuffer;
-        private int _readOffset;
-        private int _readLength;
+        private SmartReadBufferStream _smartReadBuffer;
 
         private bool _inUse;
         private bool _canRetry;
@@ -88,7 +86,7 @@ namespace System.Net.Http
             _transportContext = transportContext;
 
             _writeBuffer = new byte[InitialWriteBufferSize];
-            _readBuffer = new byte[InitialReadBufferSize];
+            _smartReadBuffer = new SmartReadBufferStream(stream, InitialReadBufferSize);
 
             _weakThisRef = new WeakReference<HttpConnection>(this);
 
@@ -207,15 +205,11 @@ namespace System.Net.Http
 
         public HttpConnectionKind Kind => _pool.Kind;
 
-        private int ReadBufferSize => _readBuffer.Length;
+        private int ReadBufferSize => _smartReadBuffer.ReadBuffer.Length;
 
-        private ReadOnlyMemory<byte> RemainingBuffer => new ReadOnlyMemory<byte>(_readBuffer, _readOffset, _readLength - _readOffset);
+        private ReadOnlyMemory<byte> RemainingBuffer => _smartReadBuffer.ReadBuffer;
 
-        private void ConsumeFromRemainingBuffer(int bytesToConsume)
-        {
-            Debug.Assert(bytesToConsume <= _readLength - _readOffset, $"{bytesToConsume} > {_readLength} - {_readOffset}");
-            _readOffset += bytesToConsume;
-        }
+        private void ConsumeFromRemainingBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
         private async ValueTask WriteHeadersAsync(HttpHeaders headers, string? cookiesFromContainer, bool async)
         {
@@ -1535,112 +1529,31 @@ namespace System.Net.Http
         {
             Debug.Assert(_readAheadTask == null);
 
-            int remaining = _readLength - _readOffset;
-            Debug.Assert(remaining >= 0);
-
-            if (remaining == 0)
+            if (_smartReadBuffer.IsReadBufferFull)
             {
-                // No data in the buffer.  Simply reset the offset and length to 0 to allow
-                // the whole buffer to be filled.
-                _readOffset = _readLength = 0;
-            }
-            else if (_readOffset > 0)
-            {
-                // There's some data in the buffer but it's not at the beginning.  Shift it
-                // down to make room for more.
-                Buffer.BlockCopy(_readBuffer, _readOffset, _readBuffer, 0, remaining);
-                _readOffset = 0;
-                _readLength = remaining;
-            }
-            else if (remaining == _readBuffer.Length)
-            {
-                // The whole buffer is full, but the caller is still requesting more data,
-                // so increase the size of the buffer.
-                Debug.Assert(_readOffset == 0);
-                Debug.Assert(_readLength == _readBuffer.Length);
-
-                var newReadBuffer = new byte[_readBuffer.Length * 2];
-                Buffer.BlockCopy(_readBuffer, 0, newReadBuffer, 0, remaining);
-                _readBuffer = newReadBuffer;
-                _readOffset = 0;
-                _readLength = remaining;
+                _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferSize * 2);
             }
 
-            int bytesRead = async ?
-                await _stream.ReadAsync(new Memory<byte>(_readBuffer, _readLength, _readBuffer.Length - _readLength)).ConfigureAwait(false) :
-                _stream.Read(_readBuffer, _readLength, _readBuffer.Length - _readLength);
+            bool success = async ?
+                await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false) :
+                _smartReadBuffer.ReadIntoBuffer();
 
-            if (NetEventSource.Log.IsEnabled()) Trace($"Received {bytesRead} bytes.");
-            if (bytesRead == 0)
+            if (!success)
             {
                 throw new IOException(SR.net_http_invalid_response_premature_eof);
             }
-
-            _readLength += bytesRead;
-        }
-
-        private void ReadFromBuffer(Span<byte> buffer)
-        {
-            Debug.Assert(buffer.Length <= _readLength - _readOffset);
-
-            new Span<byte>(_readBuffer, _readOffset, buffer.Length).CopyTo(buffer);
-            _readOffset += buffer.Length;
         }
 
         private int Read(Span<byte> destination)
         {
             // This is called when reading the response body.
-
-            int remaining = _readLength - _readOffset;
-            if (remaining > 0)
-            {
-                // We have data in the read buffer.  Return it to the caller.
-                if (destination.Length <= remaining)
-                {
-                    ReadFromBuffer(destination);
-                    return destination.Length;
-                }
-                else
-                {
-                    ReadFromBuffer(destination.Slice(0, remaining));
-                    return remaining;
-                }
-            }
-
-            // No data in read buffer.
-            // Do an unbuffered read directly against the underlying stream.
-            Debug.Assert(_readAheadTask == null, "Read ahead task should have been consumed as part of the headers.");
-            int count = _stream.Read(destination);
-            if (NetEventSource.Log.IsEnabled()) Trace($"Received {count} bytes.");
-            return count;
+            return _smartReadBuffer.Read(destination);
         }
 
-        private async ValueTask<int> ReadAsync(Memory<byte> destination)
+        private ValueTask<int> ReadAsync(Memory<byte> destination)
         {
             // This is called when reading the response body.
-
-            int remaining = _readLength - _readOffset;
-            if (remaining > 0)
-            {
-                // We have data in the read buffer.  Return it to the caller.
-                if (destination.Length <= remaining)
-                {
-                    ReadFromBuffer(destination.Span);
-                    return destination.Length;
-                }
-                else
-                {
-                    ReadFromBuffer(destination.Span.Slice(0, remaining));
-                    return remaining;
-                }
-            }
-
-            // No data in read buffer.
-            // Do an unbuffered read directly against the underlying stream.
-            Debug.Assert(_readAheadTask == null, "Read ahead task should have been consumed as part of the headers.");
-            int count = await _stream.ReadAsync(destination).ConfigureAwait(false);
-            if (NetEventSource.Log.IsEnabled()) Trace($"Received {count} bytes.");
-            return count;
+            return _smartReadBuffer.ReadAsync(destination);
         }
 
         private int ReadBuffered(Span<byte> destination)
