@@ -224,6 +224,21 @@ namespace System.Net.Http
             }
         }
 
+        private void EnsureReadBufferCapacity(int bytesNeeded)
+        {
+            int capacity = _smartReadBuffer.ReadBufferCapacity;
+            if (capacity < bytesNeeded)
+            {
+                do
+                {
+                    checked { capacity *= 2; }
+                }
+                while (capacity < bytesNeeded);
+
+                _smartReadBuffer.SetReadBufferCapacity(capacity);
+            }
+        }
+
         private async ValueTask<FrameHeader> ReadFrameAsync(bool initialFrame = false)
         {
             if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(initialFrame)}={initialFrame}");
@@ -233,11 +248,7 @@ namespace System.Net.Http
             {
                 do
                 {
-                    // TODO: Be smarter about buffer capacity
-                    if (_smartReadBuffer.IsReadBufferFull)
-                    {
-                        _smartReadBuffer.SetReadBufferCapacity(_smartReadBuffer.ReadBufferCapacity * 2);
-                    }
+                    EnsureReadBufferCapacity(FrameHeader.Size);
 
                     if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
                     {
@@ -274,11 +285,7 @@ namespace System.Net.Http
             {
                 do
                 {
-                    // TODO: Be smarter about buffer capacity
-                    if (_smartReadBuffer.IsReadBufferFull)
-                    {
-                        _smartReadBuffer.SetReadBufferCapacity(_smartReadBuffer.ReadBufferCapacity * 2);
-                    }
+                    EnsureReadBufferCapacity(frameHeader.PayloadLength);
 
                     if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
                     {

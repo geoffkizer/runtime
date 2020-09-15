@@ -123,22 +123,27 @@ namespace System.Net.Http
                 throw new InvalidOperationException("new buffer capacity can't hold existing buffered data");
             }
 
-            if (capacity == 0)
+            if (capacity != _readBufferCapacity)
             {
-                _readBuffer = null;
-            }
-            else
-            {
-                byte[] newReadBuffer = ArrayPool<byte>.Shared.Rent(capacity);
-                if (_readLength != 0)
+                if (capacity == 0)
                 {
-                    ReadBuffer.CopyTo(newReadBuffer);
+                    Debug.Assert(_readBuffer is not null);
+                    ArrayPool<byte>.Shared.Return(_readBuffer!);
+                    _readBuffer = null;
                 }
-                _readBuffer = newReadBuffer;
-            }
+                else
+                {
+                    byte[] newReadBuffer = ArrayPool<byte>.Shared.Rent(capacity);
+                    if (_readLength != 0)
+                    {
+                        ReadBuffer.CopyTo(newReadBuffer);
+                    }
+                    _readBuffer = newReadBuffer;
+                }
 
-            _readBufferCapacity = capacity;
-            _readStart = 0;
+                _readBufferCapacity = capacity;
+                _readStart = 0;
+            }
         }
 
         private int TryReadFromBuffer(Span<byte> buffer)
