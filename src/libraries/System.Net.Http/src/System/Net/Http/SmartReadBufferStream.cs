@@ -27,7 +27,7 @@ namespace System.Net.Http
         {
             if (!innerStream.CanRead)
             {
-                throw new InvalidOperationException("Can't read");
+                throw new ArgumentException(nameof(innerStream));
             }
 
             if (readBufferCapacity < 0)
@@ -106,14 +106,9 @@ namespace System.Net.Http
 
         public void Consume(int bytesConsumed)
         {
-            if (bytesConsumed < 0)
+            if (bytesConsumed < 0 || bytesConsumed > _readLength)
             {
-                throw new ArgumentException(nameof(bytesConsumed));
-            }
-
-            if (bytesConsumed > _readLength)
-            {
-                throw new InvalidOperationException("consume more than buffer size??");
+                throw new ArgumentOutOfRangeException(nameof(bytesConsumed));
             }
 
             _readStart += bytesConsumed;
@@ -189,7 +184,7 @@ namespace System.Net.Http
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException("can't write");
+            throw new InvalidOperationException();
         }
 
         protected override void Dispose(bool disposing)
