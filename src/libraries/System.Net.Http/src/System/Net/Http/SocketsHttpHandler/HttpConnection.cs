@@ -1531,7 +1531,7 @@ namespace System.Net.Http
 
             if (_smartReadBuffer.IsReadBufferFull)
             {
-                _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferSize * 2);
+                _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferCapacity * 2);
             }
 
             bool success = async ?

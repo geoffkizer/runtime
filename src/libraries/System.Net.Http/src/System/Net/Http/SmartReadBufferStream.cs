@@ -17,27 +17,27 @@ namespace System.Net.Http
     {
         private readonly Stream _innerStream;
         private byte[]? _readBuffer;
-        private int _readBufferSize;
+        private int _readBufferCapacity;
         private int _readStart;
         private int _readLength;
 
-        public const int DefaultReadBufferSize = 4096;
+        public const int DefaultReadBufferCapacity = 4096;
 
-        public SmartReadBufferStream(Stream innerStream, int readBufferSize = DefaultReadBufferSize)
+        public SmartReadBufferStream(Stream innerStream, int readBufferCapacity = DefaultReadBufferCapacity)
         {
             if (!innerStream.CanRead)
             {
                 throw new InvalidOperationException("Can't read");
             }
 
-            if (readBufferSize < 0)
+            if (readBufferCapacity < 0)
             {
-                throw new ArgumentException(nameof(readBufferSize));
+                throw new ArgumentException(nameof(readBufferCapacity));
             }
 
             _innerStream = innerStream;
-            _readBuffer = (readBufferSize == 0 ? null : ArrayPool<byte>.Shared.Rent(readBufferSize));
-            _readBufferSize = readBufferSize;
+            _readBuffer = (readBufferCapacity == 0 ? null : ArrayPool<byte>.Shared.Rent(readBufferCapacity));
+            _readBufferCapacity = readBufferCapacity;
             _readStart = 0;
             _readLength = 0;
         }
@@ -47,17 +47,16 @@ namespace System.Net.Http
 
         public ReadOnlyMemory<byte> ReadBuffer => new ReadOnlyMemory<byte>(_readBuffer, _readStart, _readLength);
 
-        // CONSIDER: Perhaps change to ReadBufferCapacity?
-        public int ReadBufferSize => _readBufferSize;
+        public int ReadBufferCapacity => _readBufferCapacity;
 
-        public bool IsReadBufferFull => _readLength == _readBufferSize;
+        public bool IsReadBufferFull => _readLength == _readBufferCapacity;
 
         private Memory<byte> AdjustBufferForRead()
         {
             Debug.Assert(_readStart >= 0, $"_readStart={_readStart}??");
-            Debug.Assert(_readStart <= _readBufferSize, $"_readStart={_readStart}, beyond _readBufferSize={_readBufferSize}");
+            Debug.Assert(_readStart <= _readBufferCapacity, $"_readStart={_readStart}, beyond _readBufferSize={_readBufferCapacity}");
             Debug.Assert(_readLength >= 0, $"_readLength={_readLength}??");
-            Debug.Assert(_readStart + _readLength <= _readBufferSize, $"_readStart={_readStart}, _readLength={_readLength}, beyond _readBufferSize={_readBufferSize}");
+            Debug.Assert(_readStart + _readLength <= _readBufferCapacity, $"_readStart={_readStart}, _readLength={_readLength}, beyond _readBufferSize={_readBufferCapacity}");
 
             if (_readStart != 0)
             {
@@ -69,12 +68,12 @@ namespace System.Net.Http
 
                 _readStart = 0;
             }
-            else if (_readLength == _readBufferSize)
+            else if (_readLength == _readBufferCapacity)
             {
                 throw new InvalidOperationException("buffer already full");
             }
 
-            return new Memory<byte>(_readBuffer, _readLength, _readBufferSize - _readLength);
+            return new Memory<byte>(_readBuffer, _readLength, _readBufferCapacity - _readLength);
         }
 
         public async ValueTask<bool> ReadIntoBufferAsync()
@@ -147,7 +146,7 @@ namespace System.Net.Http
                 _readBuffer = newReadBuffer;
             }
 
-            _readBufferSize = size;
+            _readBufferCapacity = size;
             _readStart = 0;
         }
 
