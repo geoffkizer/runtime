@@ -100,15 +100,15 @@ namespace System.Net.Http
             return true;
         }
 
-        public void Consume(int bytesConsumed)
+        public void Consume(int bytesToConsume)
         {
-            if (bytesConsumed < 0 || bytesConsumed > _readLength)
+            if (bytesToConsume < 0 || bytesToConsume > _readLength)
             {
-                throw new ArgumentOutOfRangeException(nameof(bytesConsumed));
+                throw new ArgumentOutOfRangeException(nameof(bytesToConsume));
             }
 
-            _readStart += bytesConsumed;
-            _readLength -= bytesConsumed;
+            _readStart += bytesToConsume;
+            _readLength -= bytesToConsume;
         }
 
         public void SetReadBufferCapacity(int capacity)
