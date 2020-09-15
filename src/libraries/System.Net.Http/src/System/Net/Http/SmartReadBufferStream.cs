@@ -115,25 +115,25 @@ namespace System.Net.Http
             _readLength -= bytesConsumed;
         }
 
-        public void SetReadBufferSize(int size)
+        public void SetReadBufferCapacity(int capacity)
         {
-            if (size < 0)
+            if (capacity < 0)
             {
-                throw new ArgumentException(nameof(size));
+                throw new ArgumentException(nameof(capacity));
             }
 
-            if (size < _readLength)
+            if (capacity < _readLength)
             {
-                throw new InvalidOperationException("new buffer size can't hold existing buffered data");
+                throw new InvalidOperationException("new buffer capacity can't hold existing buffered data");
             }
 
-            if (size == 0)
+            if (capacity == 0)
             {
                 _readBuffer = null;
             }
             else
             {
-                byte[] newReadBuffer = ArrayPool<byte>.Shared.Rent(size);
+                byte[] newReadBuffer = ArrayPool<byte>.Shared.Rent(capacity);
                 if (_readLength != 0)
                 {
                     ReadBuffer.CopyTo(newReadBuffer);
@@ -141,7 +141,7 @@ namespace System.Net.Http
                 _readBuffer = newReadBuffer;
             }
 
-            _readBufferCapacity = size;
+            _readBufferCapacity = capacity;
             _readStart = 0;
         }
 

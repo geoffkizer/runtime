@@ -236,7 +236,7 @@ namespace System.Net.Http
                     // TODO: Be smarter about buffer capacity
                     if (_smartReadBuffer.IsReadBufferFull)
                     {
-                        _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferCapacity * 2);
+                        _smartReadBuffer.SetReadBufferCapacity(_smartReadBuffer.ReadBufferCapacity * 2);
                     }
 
                     if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
@@ -277,7 +277,7 @@ namespace System.Net.Http
                     // TODO: Be smarter about buffer capacity
                     if (_smartReadBuffer.IsReadBufferFull)
                     {
-                        _smartReadBuffer.SetReadBufferSize(_smartReadBuffer.ReadBufferCapacity * 2);
+                        _smartReadBuffer.SetReadBufferCapacity(_smartReadBuffer.ReadBufferCapacity * 2);
                     }
 
                     if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
