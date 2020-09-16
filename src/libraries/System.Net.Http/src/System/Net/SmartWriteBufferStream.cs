@@ -111,13 +111,6 @@ namespace System.Net
             }
         }
 
-        // The general idea for write should be as follows:
-        // If there's data in the buffer currently, then write as much of the data as we can into the buffer.
-        // If this handles all the data, we're done.
-        // If not, then we need to flush the buffer and then continue.
-        // If the remaining data fits in the buffer, then just put it in the buffer.
-        // Otherwise, write it directly to the underlying stream.
-
         private int WriteIntoBuffer(ReadOnlySpan<byte> buffer)
         {
             Span<byte> writeBuffer = WriteBuffer.Span;
@@ -131,12 +124,66 @@ namespace System.Net
 
         public override void Write(ReadOnlySpan<byte> buffer)
         {
-            throw new InvalidOperationException();
+            if (_writeLength > 0)
+            {
+                int bytesWritten = WriteIntoBuffer(buffer);
+                buffer = buffer.Slice(bytesWritten);
+
+                if (buffer.Length == 0)
+                {
+                    return;
+                }
+
+                Debug.Assert(IsWriteBufferFull);
+                _innerStream.Write(BufferedWriteBytes.Span);
+                _writeLength = 0;
+            }
+
+            if (buffer.Length < _writeBufferCapacity)
+            {
+                WriteIntoBuffer(buffer);
+                return;
+            }
+
+            _innerStream.Write(buffer);
         }
 
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException();
+            if (_writeLength > 0)
+            {
+                int bytesWritten = WriteIntoBuffer(buffer.Span);
+                buffer = buffer.Slice(bytesWritten);
+
+                if (buffer.Length == 0)
+                {
+                    return;
+                }
+
+                Debug.Assert(IsWriteBufferFull);
+                await _innerStream.WriteAsync(BufferedWriteBytes, cancellationToken).ConfigureAwait(false);
+                _writeLength = 0;
+            }
+
+            if (buffer.Length < _writeBufferCapacity)
+            {
+                WriteIntoBuffer(buffer.Span);
+                return;
+            }
+
+            await _innerStream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+
+        public override void Flush()
+        {
+            WriteFromBuffer();
+            _innerStream.Flush();
+        }
+
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
+            await WriteFromBufferAsync(cancellationToken).ConfigureAwait(false);
+            await _innerStream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
         protected override void Dispose(bool disposing)
