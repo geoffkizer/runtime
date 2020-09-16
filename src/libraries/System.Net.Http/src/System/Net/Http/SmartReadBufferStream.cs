@@ -211,6 +211,12 @@ namespace System.Net.Http
             return await _innerStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
 
+        // TODO: Why is this exposed as byte[] instead of ReadOnlySpan<byte>?
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new InvalidOperationException();
+        }
+
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException();
@@ -224,6 +230,8 @@ namespace System.Net.Http
                 {
                     ArrayPool<byte>.Shared.Return(_readBuffer);
                     _readBuffer = null;
+                    _readStart = 0;
+                    _readLength = 0;
                 }
 
                 _innerStream.Dispose();
