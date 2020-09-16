@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace System.Net.Http
+namespace System.Net
 {
     internal abstract class BaseStream : Stream
     {

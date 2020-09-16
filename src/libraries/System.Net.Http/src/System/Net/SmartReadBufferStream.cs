@@ -7,7 +7,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace System.Net.Http
+namespace System.Net
 {
     internal sealed class SmartReadBufferStream : BaseStream
     {
