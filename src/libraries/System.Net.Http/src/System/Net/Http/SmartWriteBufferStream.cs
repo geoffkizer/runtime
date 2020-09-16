@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace System.Net.Http
 {
-    internal sealed class SmartWriteBufferStream : HttpBaseStream
+    internal sealed class SmartWriteBufferStream : BaseStream
     {
         private readonly Stream _innerStream;
         private byte[]? _writeBuffer;
@@ -129,17 +129,12 @@ namespace System.Net.Http
             return bytesToWrite;
         }
 
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            throw new InvalidOperationException();
+        }
+
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            throw new InvalidOperationException();
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            throw new InvalidOperationException();
-        }
-
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException();
         }

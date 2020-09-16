@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace System.Net.Http
 {
-    internal sealed class SmartReadBufferStream : HttpBaseStream
+    internal sealed class SmartReadBufferStream : BaseStream
     {
         private readonly Stream _innerStream;
         private byte[]? _readBuffer;
@@ -209,17 +209,6 @@ namespace System.Net.Http
             }
 
             return await _innerStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-        }
-
-        // TODO: Why is this exposed as byte[] instead of ReadOnlySpan<byte>?
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            throw new InvalidOperationException();
-        }
-
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            throw new InvalidOperationException();
         }
 
         protected override void Dispose(bool disposing)

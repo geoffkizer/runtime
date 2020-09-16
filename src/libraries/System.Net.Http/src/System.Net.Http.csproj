@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="System\Net\Http\BaseStream.cs" />
     <Compile Include="System\Net\Http\ByteArrayContent.cs" />
     <Compile Include="System\Net\Http\ByteArrayHelpers.cs" />
     <Compile Include="System\Net\Http\CancellationHelper.cs" />
