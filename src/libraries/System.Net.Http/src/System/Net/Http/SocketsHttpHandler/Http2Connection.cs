@@ -171,29 +171,33 @@ namespace System.Net.Http
 
         private void ConsumeReadBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
+        private Memory<byte> WriteBuffer => _outgoingBuffer.AvailableMemory;
+
+        private void AdvanceWriteBuffer(int bytesToAdvance) => _outgoingBuffer.Commit(bytesToAdvance);
+
         public async ValueTask SetupAsync()
         {
-            _outgoingBuffer.EnsureAvailableSpace(s_http2ConnectionPreface.Length +
+            EnsureWriteBufferCapacity(s_http2ConnectionPreface.Length +
                 FrameHeader.Size + FrameHeader.SettingLength +
                 FrameHeader.Size + FrameHeader.WindowUpdateLength);
 
             // Send connection preface
-            s_http2ConnectionPreface.AsSpan().CopyTo(_outgoingBuffer.AvailableSpan);
-            _outgoingBuffer.Commit(s_http2ConnectionPreface.Length);
+            s_http2ConnectionPreface.AsSpan().CopyTo(WriteBuffer.Span);
+            AdvanceWriteBuffer(s_http2ConnectionPreface.Length);
 
             // Send SETTINGS frame.  Disable push promise.
-            FrameHeader.WriteTo(_outgoingBuffer.AvailableSpan, FrameHeader.SettingLength, FrameType.Settings, FrameFlags.None, streamId: 0);
-            _outgoingBuffer.Commit(FrameHeader.Size);
-            BinaryPrimitives.WriteUInt16BigEndian(_outgoingBuffer.AvailableSpan, (ushort)SettingId.EnablePush);
-            _outgoingBuffer.Commit(2);
-            BinaryPrimitives.WriteUInt32BigEndian(_outgoingBuffer.AvailableSpan, 0);
-            _outgoingBuffer.Commit(4);
+            FrameHeader.WriteTo(WriteBuffer.Span, FrameHeader.SettingLength, FrameType.Settings, FrameFlags.None, streamId: 0);
+            AdvanceWriteBuffer(FrameHeader.Size);
+            BinaryPrimitives.WriteUInt16BigEndian(WriteBuffer.Span, (ushort)SettingId.EnablePush);
+            AdvanceWriteBuffer(2);
+            BinaryPrimitives.WriteUInt32BigEndian(WriteBuffer.Span, 0);
+            AdvanceWriteBuffer(4);
 
             // Send initial connection-level WINDOW_UPDATE
-            FrameHeader.WriteTo(_outgoingBuffer.AvailableSpan, FrameHeader.WindowUpdateLength, FrameType.WindowUpdate, FrameFlags.None, streamId: 0);
-            _outgoingBuffer.Commit(FrameHeader.Size);
-            BinaryPrimitives.WriteUInt32BigEndian(_outgoingBuffer.AvailableSpan, ConnectionWindowSize - DefaultInitialWindowSize);
-            _outgoingBuffer.Commit(4);
+            FrameHeader.WriteTo(WriteBuffer.Span, FrameHeader.WindowUpdateLength, FrameType.WindowUpdate, FrameFlags.None, streamId: 0);
+            AdvanceWriteBuffer(FrameHeader.Size);
+            BinaryPrimitives.WriteUInt32BigEndian(WriteBuffer.Span, ConnectionWindowSize - DefaultInitialWindowSize);
+            AdvanceWriteBuffer(4);
 
             await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
             _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
@@ -213,15 +217,15 @@ namespace System.Net.Http
                 try
                 {
                     await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
+                    _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
                 }
                 catch (Exception e)
                 {
                     Abort(e);
                 }
-
-                _lastPendingWriterShouldFlush = false;
-                _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
             }
+
+            _lastPendingWriterShouldFlush = false;
         }
 
         private void EnsureReadBufferCapacity(int bytesNeeded)
@@ -237,6 +241,25 @@ namespace System.Net.Http
 
                 _smartReadBuffer.SetReadBufferCapacity(capacity);
             }
+        }
+
+        private void EnsureWriteBufferCapacity(int bytesNeeded)
+        {
+            _outgoingBuffer.EnsureAvailableSpace(bytesNeeded);
+
+#if false
+            int capacity = _smartReadBuffer.ReadBufferCapacity;
+            if (capacity < bytesNeeded)
+            {
+                do
+                {
+                    checked { capacity *= 2; }
+                }
+                while (capacity < bytesNeeded);
+
+                _smartReadBuffer.SetReadBufferCapacity(capacity);
+            }
+#endif
         }
 
         private async ValueTask<FrameHeader> ReadFrameAsync(bool initialFrame = false)
@@ -960,7 +983,7 @@ namespace System.Net.Http
                             // We are ready to process the write, so disable write cancellation now.
                             if (writeEntry.TryDisableCancellation())
                             {
-                                _outgoingBuffer.EnsureAvailableSpace(writeBytes);
+                                EnsureWriteBufferCapacity(writeBytes);
 
                                 try
                                 {
@@ -971,7 +994,7 @@ namespace System.Net.Http
 
                                     writeEntry.SetResult();
 
-                                    _outgoingBuffer.Commit(writeBytes);
+                                    AdvanceWriteBuffer(writeBytes);
                                     _lastPendingWriterShouldFlush |= flush;
                                 }
                                 catch (Exception e)
