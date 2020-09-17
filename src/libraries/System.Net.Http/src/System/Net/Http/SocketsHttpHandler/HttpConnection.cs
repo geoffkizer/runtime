@@ -211,6 +211,10 @@ namespace System.Net.Http
 
         private void ConsumeFromRemainingBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
+        private Memory<byte> WriteBuffer => new Memory<byte>(_writeBuffer, _writeOffset, _writeBuffer.Length - _writeOffset);
+
+        private void AdvanceWriteBuffer(int amount) => _writeOffset += amount;
+
         private async ValueTask WriteHeadersAsync(HttpHeaders headers, string? cookiesFromContainer, bool async)
         {
             Debug.Assert(_currentRequest != null);
@@ -319,7 +323,7 @@ namespace System.Net.Http
         private Task WriteDecimalInt32Async(int value, bool async)
         {
             // Try to format into our output buffer directly.
-            if (Utf8Formatter.TryFormat(value, new Span<byte>(_writeBuffer, _writeOffset, _writeBuffer.Length - _writeOffset), out int bytesWritten))
+            if (Utf8Formatter.TryFormat(value, WriteBuffer.Span, out int bytesWritten))
             {
                 _writeOffset += bytesWritten;
                 return Task.CompletedTask;
@@ -332,7 +336,7 @@ namespace System.Net.Http
         private Task WriteHexInt32Async(int value, bool async)
         {
             // Try to format into our output buffer directly.
-            if (Utf8Formatter.TryFormat(value, new Span<byte>(_writeBuffer, _writeOffset, _writeBuffer.Length - _writeOffset), out int bytesWritten, 'X'))
+            if (Utf8Formatter.TryFormat(value, WriteBuffer.Span, out int bytesWritten, 'X'))
             {
                 _writeOffset += bytesWritten;
                 return Task.CompletedTask;
@@ -1050,18 +1054,14 @@ namespace System.Net.Http
 
         private void WriteToBuffer(ReadOnlySpan<byte> source)
         {
-            Debug.Assert(source.Length <= _writeBuffer.Length - _writeOffset);
-            source.CopyTo(new Span<byte>(_writeBuffer, _writeOffset, source.Length));
-            _writeOffset += source.Length;
+            Debug.Assert(source.Length <= WriteBuffer.Length);
+            source.CopyTo(WriteBuffer.Span);
+            AdvanceWriteBuffer(source.Length);
         }
 
-        private void WriteToBuffer(ReadOnlyMemory<byte> source)
-        {
-            Debug.Assert(source.Length <= _writeBuffer.Length - _writeOffset);
-            source.Span.CopyTo(new Span<byte>(_writeBuffer, _writeOffset, source.Length));
-            _writeOffset += source.Length;
-        }
+        private void WriteToBuffer(ReadOnlyMemory<byte> source) => WriteToBuffer(source.Span);
 
+        // TODO: Map to smart buffer write
         private void Write(ReadOnlySpan<byte> source)
         {
             int remaining = _writeBuffer.Length - _writeOffset;
@@ -1093,6 +1093,7 @@ namespace System.Net.Http
             }
         }
 
+        // TODO: Map to smart buffer write
         private async ValueTask WriteAsync(ReadOnlyMemory<byte> source, bool async)
         {
             int remaining = _writeBuffer.Length - _writeOffset;
@@ -1124,66 +1125,26 @@ namespace System.Net.Http
             }
         }
 
+        // NOTE: This will result in unnecessary copies in some cases. Consider if we care about this.
+
         private void WriteWithoutBuffering(ReadOnlySpan<byte> source)
         {
-            if (_writeOffset != 0)
-            {
-                int remaining = _writeBuffer.Length - _writeOffset;
-                if (source.Length <= remaining)
-                {
-                    // There's something already in the write buffer, but the content
-                    // we're writing can also fit after it in the write buffer.  Copy
-                    // the content to the write buffer and then flush it, so that we
-                    // can do a single send rather than two.
-                    WriteToBuffer(source);
-                    Flush();
-                    return;
-                }
-
-                // There's data in the write buffer and the data we're writing doesn't fit after it.
-                // Do two writes, one to flush the buffer and then another to write the supplied content.
-                Flush();
-            }
-
-            WriteToStream(source);
+            Write(source);
+            Flush();
         }
 
-        private ValueTask WriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
+        private async ValueTask WriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
         {
-            if (_writeOffset == 0)
-            {
-                // There's nothing in the write buffer we need to flush.
-                // Just write the supplied data out to the stream.
-                return WriteToStreamAsync(source, async);
-            }
-
-            int remaining = _writeBuffer.Length - _writeOffset;
-            if (source.Length <= remaining)
-            {
-                // There's something already in the write buffer, but the content
-                // we're writing can also fit after it in the write buffer.  Copy
-                // the content to the write buffer and then flush it, so that we
-                // can do a single send rather than two.
-                WriteToBuffer(source);
-                return FlushAsync(async);
-            }
-
-            // There's data in the write buffer and the data we're writing doesn't fit after it.
-            // Do two writes, one to flush the buffer and then another to write the supplied content.
-            return FlushThenWriteWithoutBufferingAsync(source, async);
-        }
-
-        private async ValueTask FlushThenWriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
-        {
+            await WriteAsync(source, async).ConfigureAwait(false);
             await FlushAsync(async).ConfigureAwait(false);
-            await WriteToStreamAsync(source, async).ConfigureAwait(false);
         }
 
         private Task WriteByteAsync(byte b, bool async)
         {
-            if (_writeOffset < _writeBuffer.Length)
+            if (WriteBuffer.Length > 0)
             {
-                _writeBuffer[_writeOffset++] = b;
+                WriteBuffer.Span[0] = b;
+                AdvanceWriteBuffer(1);
                 return Task.CompletedTask;
             }
             return WriteByteSlowAsync(b, async);
@@ -1191,20 +1152,21 @@ namespace System.Net.Http
 
         private async Task WriteByteSlowAsync(byte b, bool async)
         {
-            Debug.Assert(_writeOffset == _writeBuffer.Length);
-            await WriteToStreamAsync(_writeBuffer, async).ConfigureAwait(false);
+            Debug.Assert(WriteBuffer.Length == 0);
+            await FlushAsync(async).ConfigureAwait(false);
 
-            _writeBuffer[0] = b;
-            _writeOffset = 1;
+            WriteBuffer.Span[0] = b;
+            AdvanceWriteBuffer(1);
         }
 
         private Task WriteTwoBytesAsync(byte b1, byte b2, bool async)
         {
-            if (_writeOffset <= _writeBuffer.Length - 2)
+            if (WriteBuffer.Length > 1)
             {
-                byte[] buffer = _writeBuffer;
-                buffer[_writeOffset++] = b1;
-                buffer[_writeOffset++] = b2;
+                Span<byte> buffer = WriteBuffer.Span;
+                buffer[0] = b1;
+                buffer[1] = b2;
+                AdvanceWriteBuffer(2);
                 return Task.CompletedTask;
             }
             return WriteTwoBytesSlowAsync(b1, b2, async);
@@ -1218,10 +1180,10 @@ namespace System.Net.Http
 
         private Task WriteBytesAsync(byte[] bytes, bool async)
         {
-            if (_writeOffset <= _writeBuffer.Length - bytes.Length)
+            if (WriteBuffer.Length >= bytes.Length)
             {
-                Buffer.BlockCopy(bytes, 0, _writeBuffer, _writeOffset, bytes.Length);
-                _writeOffset += bytes.Length;
+                bytes.AsSpan().CopyTo(WriteBuffer.Span);
+                AdvanceWriteBuffer(bytes.Length);
                 return Task.CompletedTask;
             }
             return WriteBytesSlowAsync(bytes, bytes.Length, async);
@@ -1233,21 +1195,19 @@ namespace System.Net.Http
             while (true)
             {
                 int remaining = length - offset;
-                int toCopy = Math.Min(remaining, _writeBuffer.Length - _writeOffset);
-                Buffer.BlockCopy(bytes, offset, _writeBuffer, _writeOffset, toCopy);
-                _writeOffset += toCopy;
+                int toCopy = Math.Min(remaining, WriteBuffer.Length);
+                bytes.AsSpan(offset, toCopy).CopyTo(WriteBuffer.Span);
+                AdvanceWriteBuffer(toCopy);
                 offset += toCopy;
 
                 Debug.Assert(offset <= length, $"Expected {nameof(offset)} to be <= {length}, got {offset}");
-                Debug.Assert(_writeOffset <= _writeBuffer.Length, $"Expected {nameof(_writeOffset)} to be <= {_writeBuffer.Length}, got {_writeOffset}");
                 if (offset == length)
                 {
                     break;
                 }
-                else if (_writeOffset == _writeBuffer.Length)
+                else if (WriteBuffer.Length == 0)
                 {
-                    await WriteToStreamAsync(_writeBuffer, async).ConfigureAwait(false);
-                    _writeOffset = 0;
+                    await FlushAsync(async).ConfigureAwait(false);
                 }
             }
         }
@@ -1256,10 +1216,10 @@ namespace System.Net.Http
         {
             // If there's enough space in the buffer to just copy all of the string's bytes, do so.
             // Unlike WriteAsciiStringAsync, validate each char along the way.
-            int offset = _writeOffset;
-            if (s.Length <= _writeBuffer.Length - offset)
+            if (s.Length <= WriteBuffer.Length)
             {
-                byte[] writeBuffer = _writeBuffer;
+                Span<byte> writeBuffer = WriteBuffer.Span;
+                int offset = 0;
                 foreach (char c in s)
                 {
                     if ((c & 0xFF80) != 0)
@@ -1268,7 +1228,7 @@ namespace System.Net.Http
                     }
                     writeBuffer[offset++] = (byte)c;
                 }
-                _writeOffset = offset;
+                AdvanceWriteBuffer(offset);
                 return Task.CompletedTask;
             }
 
@@ -1285,9 +1245,10 @@ namespace System.Net.Http
             }
 
             // If there's enough space in the buffer to just copy all of the string's bytes, do so.
-            if (encoding.GetMaxByteCount(s.Length) <= _writeBuffer.Length - _writeOffset)
+            if (encoding.GetMaxByteCount(s.Length) <= WriteBuffer.Length)
             {
-                _writeOffset += encoding.GetBytes(s, _writeBuffer.AsSpan(_writeOffset));
+                int bytesWritten = encoding.GetBytes(s, WriteBuffer.Span);
+                AdvanceWriteBuffer(bytesWritten);
                 return Task.CompletedTask;
             }
 
@@ -1317,15 +1278,15 @@ namespace System.Net.Http
         private Task WriteAsciiStringAsync(string s, bool async)
         {
             // If there's enough space in the buffer to just copy all of the string's bytes, do so.
-            int offset = _writeOffset;
-            if (s.Length <= _writeBuffer.Length - offset)
+            if (s.Length <= WriteBuffer.Length)
             {
-                byte[] writeBuffer = _writeBuffer;
+                Span<byte> writeBuffer = WriteBuffer.Span;
+                int offset = 0;
                 foreach (char c in s)
                 {
                     writeBuffer[offset++] = (byte)c;
                 }
-                _writeOffset = offset;
+                AdvanceWriteBuffer(offset);
                 return Task.CompletedTask;
             }
 
@@ -1367,12 +1328,14 @@ namespace System.Net.Http
             return default;
         }
 
+        // TODO: Does this go away?
         private void WriteToStream(ReadOnlySpan<byte> source)
         {
             if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
             _stream.Write(source);
         }
 
+        // TODO: Does this go away?
         private ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> source, bool async)
         {
             if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
@@ -1738,7 +1701,7 @@ namespace System.Net.Http
         private void CompleteResponse()
         {
             Debug.Assert(_currentRequest != null, "Expected the connection to be associated with a request.");
-            Debug.Assert(_writeOffset == 0, "Everything in write buffer should have been flushed.");
+            Debug.Assert(WriteBuffer.Length == _writeBuffer.Length, "Everything in write buffer should have been flushed.");
 
             // Disassociate the connection from a request.
             _currentRequest = null;
