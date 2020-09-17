@@ -50,8 +50,8 @@ namespace System.Net.Http
         private readonly WeakReference<HttpConnection> _weakThisRef;
 
         private HttpRequestMessage? _currentRequest;
-        private readonly byte[] _writeBuffer;
-        private int _writeOffset;
+        private SmartWriteBufferStream _smartWriteBuffer;
+
         private int _allowedReadLineBytes;
         /// <summary>Reusable array used to get the values for each header being written to the wire.</summary>
         private string[] _headerValues = Array.Empty<string>();
@@ -85,7 +85,7 @@ namespace System.Net.Http
 
             _transportContext = transportContext;
 
-            _writeBuffer = new byte[InitialWriteBufferSize];
+            _smartWriteBuffer = new SmartWriteBufferStream(stream, InitialWriteBufferSize);
             _smartReadBuffer = new SmartReadBufferStream(stream, InitialReadBufferSize);
 
             _weakThisRef = new WeakReference<HttpConnection>(this);
@@ -211,9 +211,9 @@ namespace System.Net.Http
 
         private void ConsumeFromRemainingBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
-        private Memory<byte> WriteBuffer => new Memory<byte>(_writeBuffer, _writeOffset, _writeBuffer.Length - _writeOffset);
+        private Memory<byte> WriteBuffer => _smartWriteBuffer.WriteBuffer;
 
-        private void AdvanceWriteBuffer(int amount) => _writeOffset += amount;
+        private void AdvanceWriteBuffer(int amount) => _smartWriteBuffer.Advance(amount);
 
         private async ValueTask WriteHeadersAsync(HttpHeaders headers, string? cookiesFromContainer, bool async)
         {
@@ -325,7 +325,7 @@ namespace System.Net.Http
             // Try to format into our output buffer directly.
             if (Utf8Formatter.TryFormat(value, WriteBuffer.Span, out int bytesWritten))
             {
-                _writeOffset += bytesWritten;
+                AdvanceWriteBuffer(bytesWritten);
                 return Task.CompletedTask;
             }
 
@@ -338,7 +338,7 @@ namespace System.Net.Http
             // Try to format into our output buffer directly.
             if (Utf8Formatter.TryFormat(value, WriteBuffer.Span, out int bytesWritten, 'X'))
             {
-                _writeOffset += bytesWritten;
+                AdvanceWriteBuffer(bytesWritten);
                 return Task.CompletedTask;
             }
 
@@ -1061,67 +1061,21 @@ namespace System.Net.Http
 
         private void WriteToBuffer(ReadOnlyMemory<byte> source) => WriteToBuffer(source.Span);
 
-        // TODO: Map to smart buffer write
         private void Write(ReadOnlySpan<byte> source)
         {
-            int remaining = _writeBuffer.Length - _writeOffset;
-
-            if (source.Length <= remaining)
-            {
-                // Fits in current write buffer.  Just copy and return.
-                WriteToBuffer(source);
-                return;
-            }
-
-            if (_writeOffset != 0)
-            {
-                // Fit what we can in the current write buffer and flush it.
-                WriteToBuffer(source.Slice(0, remaining));
-                source = source.Slice(remaining);
-                Flush();
-            }
-
-            if (source.Length >= _writeBuffer.Length)
-            {
-                // Large write.  No sense buffering this.  Write directly to stream.
-                WriteToStream(source);
-            }
-            else
-            {
-                // Copy remainder into buffer
-                WriteToBuffer(source);
-            }
+            _smartWriteBuffer.Write(source);
         }
 
-        // TODO: Map to smart buffer write
-        private async ValueTask WriteAsync(ReadOnlyMemory<byte> source, bool async)
+        private ValueTask WriteAsync(ReadOnlyMemory<byte> source, bool async)
         {
-            int remaining = _writeBuffer.Length - _writeOffset;
-
-            if (source.Length <= remaining)
+            if (async)
             {
-                // Fits in current write buffer.  Just copy and return.
-                WriteToBuffer(source);
-                return;
-            }
-
-            if (_writeOffset != 0)
-            {
-                // Fit what we can in the current write buffer and flush it.
-                WriteToBuffer(source.Slice(0, remaining));
-                source = source.Slice(remaining);
-                await FlushAsync(async).ConfigureAwait(false);
-            }
-
-            if (source.Length >= _writeBuffer.Length)
-            {
-                // Large write.  No sense buffering this.  Write directly to stream.
-                await WriteToStreamAsync(source, async).ConfigureAwait(false);
+                return _smartWriteBuffer.WriteAsync(source);
             }
             else
             {
-                // Copy remainder into buffer
-                WriteToBuffer(source);
+                _smartWriteBuffer.Write(source.Span);
+                return ValueTask.CompletedTask;
             }
         }
 
@@ -1310,44 +1264,19 @@ namespace System.Net.Http
 
         private void Flush()
         {
-            if (_writeOffset > 0)
-            {
-                WriteToStream(new ReadOnlySpan<byte>(_writeBuffer, 0, _writeOffset));
-                _writeOffset = 0;
-            }
+            _smartWriteBuffer.WriteFromBuffer();
         }
 
         private ValueTask FlushAsync(bool async)
         {
-            if (_writeOffset > 0)
-            {
-                ValueTask t = WriteToStreamAsync(new ReadOnlyMemory<byte>(_writeBuffer, 0, _writeOffset), async);
-                _writeOffset = 0;
-                return t;
-            }
-            return default;
-        }
-
-        // TODO: Does this go away?
-        private void WriteToStream(ReadOnlySpan<byte> source)
-        {
-            if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
-            _stream.Write(source);
-        }
-
-        // TODO: Does this go away?
-        private ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> source, bool async)
-        {
-            if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
-
             if (async)
             {
-                return _stream.WriteAsync(source);
+                return _smartWriteBuffer.WriteFromBufferAsync();
             }
             else
             {
-                _stream.Write(source.Span);
-                return default;
+                _smartWriteBuffer.WriteFromBuffer();
+                return ValueTask.CompletedTask;
             }
         }
 
@@ -1701,7 +1630,7 @@ namespace System.Net.Http
         private void CompleteResponse()
         {
             Debug.Assert(_currentRequest != null, "Expected the connection to be associated with a request.");
-            Debug.Assert(WriteBuffer.Length == _writeBuffer.Length, "Everything in write buffer should have been flushed.");
+            Debug.Assert(WriteBuffer.Length == _smartWriteBuffer.WriteBufferCapacity, "Everything in write buffer should have been flushed.");
 
             // Disassociate the connection from a request.
             _currentRequest = null;
