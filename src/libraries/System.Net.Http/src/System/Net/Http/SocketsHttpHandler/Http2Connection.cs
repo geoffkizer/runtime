@@ -24,10 +24,8 @@ namespace System.Net.Http
         private readonly HttpConnectionPool _pool;
         private readonly Stream _stream;
 
-        // NOTE: These are mutable structs; do not make these readonly.
-        //private ArrayBuffer _incomingBuffer;
-        private SmartReadBufferStream _smartReadBuffer;
-        private ArrayBuffer _outgoingBuffer;
+        private readonly SmartReadBufferStream _smartReadBuffer;
+        private readonly SmartWriteBufferStream _smartWriteBuffer;
 
         /// <summary>Reusable array used to get the values for each header being written to the wire.</summary>
         [ThreadStatic]
@@ -123,7 +121,7 @@ namespace System.Net.Http
             _pool = pool;
             _stream = stream;
             _smartReadBuffer = new SmartReadBufferStream(stream, InitialConnectionBufferSize);
-            _outgoingBuffer = new ArrayBuffer(InitialConnectionBufferSize);
+            _smartWriteBuffer = new SmartWriteBufferStream(stream, InitialConnectionBufferSize);
 
             _hpackDecoder = new HPackDecoder(maxHeadersLength: pool.Settings._maxResponseHeadersLength * 1024);
 
@@ -171,9 +169,9 @@ namespace System.Net.Http
 
         private void ConsumeReadBuffer(int bytesToConsume) => _smartReadBuffer.Consume(bytesToConsume);
 
-        private Memory<byte> WriteBuffer => _outgoingBuffer.AvailableMemory;
+        private Memory<byte> WriteBuffer => _smartWriteBuffer.WriteBuffer;
 
-        private void AdvanceWriteBuffer(int bytesToAdvance) => _outgoingBuffer.Commit(bytesToAdvance);
+        private void AdvanceWriteBuffer(int bytesToAdvance) => _smartWriteBuffer.Advance(bytesToAdvance);
 
         public async ValueTask SetupAsync()
         {
@@ -199,8 +197,7 @@ namespace System.Net.Http
             BinaryPrimitives.WriteUInt32BigEndian(WriteBuffer.Span, ConnectionWindowSize - DefaultInitialWindowSize);
             AdvanceWriteBuffer(4);
 
-            await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
-            _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
+            await _smartWriteBuffer.WriteFromBufferAsync().ConfigureAwait(false);
 
             _expectingSettingsAck = true;
 
@@ -210,19 +207,15 @@ namespace System.Net.Http
 
         private async Task FlushOutgoingBytesAsync()
         {
-            if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(_outgoingBuffer.ActiveLength)}={_outgoingBuffer.ActiveLength}");
+            //if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(_outgoingBuffer.ActiveLength)}={_outgoingBuffer.ActiveLength}");
 
-            if (_outgoingBuffer.ActiveLength > 0)
+            try
             {
-                try
-                {
-                    await _stream.WriteAsync(_outgoingBuffer.ActiveMemory).ConfigureAwait(false);
-                    _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
-                }
-                catch (Exception e)
-                {
-                    Abort(e);
-                }
+                await _smartWriteBuffer.WriteFromBufferAsync().ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                Abort(e);
             }
 
             _lastPendingWriterShouldFlush = false;
@@ -245,10 +238,7 @@ namespace System.Net.Http
 
         private void EnsureWriteBufferCapacity(int bytesNeeded)
         {
-            _outgoingBuffer.EnsureAvailableSpace(bytesNeeded);
-
-#if false
-            int capacity = _smartReadBuffer.ReadBufferCapacity;
+            int capacity = _smartWriteBuffer.WriteBufferCapacity;
             if (capacity < bytesNeeded)
             {
                 do
@@ -257,9 +247,8 @@ namespace System.Net.Http
                 }
                 while (capacity < bytesNeeded);
 
-                _smartReadBuffer.SetReadBufferCapacity(capacity);
+                _smartWriteBuffer.SetWriteBufferCapacity(capacity);
             }
-#endif
         }
 
         private async ValueTask<FrameHeader> ReadFrameAsync(bool initialFrame = false)
@@ -970,10 +959,10 @@ namespace System.Net.Http
 
                             // If the buffer has already grown to 32k, does not have room for the next request,
                             // and is non-empty, flush the current contents to the wire.
-                            int totalBufferLength = _outgoingBuffer.Capacity;
+                            int totalBufferLength = _smartWriteBuffer.WriteBufferCapacity;
+                            int activeBufferLength = _smartWriteBuffer.WriteBufferCapacity - _smartWriteBuffer.WriteBuffer.Length;
                             if (totalBufferLength >= UnflushedOutgoingBufferSize)
                             {
-                                int activeBufferLength = _outgoingBuffer.ActiveLength;
                                 if (writeBytes >= totalBufferLength - activeBufferLength)
                                 {
                                     await FlushOutgoingBytesAsync().ConfigureAwait(false);
@@ -983,14 +972,14 @@ namespace System.Net.Http
                             // We are ready to process the write, so disable write cancellation now.
                             if (writeEntry.TryDisableCancellation())
                             {
-                                EnsureWriteBufferCapacity(writeBytes);
+                                EnsureWriteBufferCapacity(activeBufferLength + writeBytes);
 
                                 try
                                 {
                                     if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(writeBytes)}={writeBytes}");
 
                                     // Invoke the callback with the supplied state and the target write buffer.
-                                    bool flush = writeEntry.InvokeWriteAction(_outgoingBuffer.AvailableMemorySliced(writeBytes));
+                                    bool flush = writeEntry.InvokeWriteAction(_smartWriteBuffer.WriteBuffer.Slice(0, writeBytes));
 
                                     writeEntry.SetResult();
 
