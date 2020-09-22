@@ -256,25 +256,17 @@ namespace System.Net.Http
             if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(initialFrame)}={initialFrame}");
 
             // Ensure we've read enough data for the frame header.
-            if (ReadBuffer.Length < FrameHeader.Size)
+            EnsureReadBufferCapacity(FrameHeader.Size);
+            if (!await _smartReadBuffer.ReadAtLeastAsync(FrameHeader.Size).ConfigureAwait(false))
             {
-                do
+                if (ReadBuffer.Length == 0)
                 {
-                    EnsureReadBufferCapacity(FrameHeader.Size);
-
-                    if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
-                    {
-                        if (ReadBuffer.Length == 0)
-                        {
-                            ThrowMissingFrame();
-                        }
-                        else
-                        {
-                            ThrowPrematureEOF(FrameHeader.Size);
-                        }
-                    }
+                    ThrowMissingFrame();
                 }
-                while (ReadBuffer.Length < FrameHeader.Size);
+                else
+                {
+                    ThrowPrematureEOF(FrameHeader.Size);
+                }
             }
 
             // Parse the frame header from our read buffer and validate it.
@@ -293,18 +285,10 @@ namespace System.Net.Http
             ConsumeReadBuffer(FrameHeader.Size);
 
             // Ensure we've read the frame contents into our buffer.
-            if (ReadBuffer.Length < frameHeader.PayloadLength)
+            EnsureReadBufferCapacity(frameHeader.PayloadLength);
+            if (!await _smartReadBuffer.ReadAtLeastAsync(frameHeader.PayloadLength).ConfigureAwait(false))
             {
-                do
-                {
-                    EnsureReadBufferCapacity(frameHeader.PayloadLength);
-
-                    if (!await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false))
-                    {
-                        ThrowPrematureEOF(frameHeader.PayloadLength);
-                    }
-                }
-                while (ReadBuffer.Length < frameHeader.PayloadLength);
+                ThrowPrematureEOF(frameHeader.PayloadLength);
             }
 
             // Return the read frame header.

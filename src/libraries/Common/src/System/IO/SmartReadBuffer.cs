@@ -97,6 +97,54 @@ namespace System.Net
             return true;
         }
 
+        public async ValueTask<bool> ReadAtLeastAsync(int bytesNeeded, CancellationToken cancellationToken = default)
+        {
+            if (ReadBuffer.Length >= bytesNeeded)
+            {
+                return true;
+            }
+
+            if (bytesNeeded > ReadBufferCapacity)
+            {
+                throw new InvalidOperationException("buffer capacity too small for requested bytes");
+            }
+
+            do
+            {
+                if (!await ReadIntoBufferAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
+            }
+            while (ReadBuffer.Length < bytesNeeded);
+
+            return true;
+        }
+
+        public bool ReadAtLeast(int bytesNeeded)
+        {
+            if (ReadBuffer.Length >= bytesNeeded)
+            {
+                return true;
+            }
+
+            if (bytesNeeded > ReadBufferCapacity)
+            {
+                throw new InvalidOperationException("buffer capacity too small for requested bytes");
+            }
+
+            do
+            {
+                if (!ReadIntoBuffer())
+                {
+                    return false;
+                }
+            }
+            while (ReadBuffer.Length < bytesNeeded);
+
+            return true;
+        }
+
         public void Consume(int bytesToConsume)
         {
             if (bytesToConsume < 0 || bytesToConsume > _readLength)
@@ -141,21 +189,6 @@ namespace System.Net
                 _readBufferCapacity = capacity;
                 _readStart = 0;
             }
-        }
-
-        private int TryReadFromBuffer(Span<byte> buffer)
-        {
-            ReadOnlySpan<byte> readBuffer = ReadBuffer.Span;
-            if (readBuffer.Length == 0)
-            {
-                return 0;
-            }
-
-            int bytesToRead = Math.Min(readBuffer.Length, buffer.Length);
-            readBuffer.Slice(0, bytesToRead).CopyTo(buffer);
-            Consume(bytesToRead);
-
-            return bytesToRead;
         }
 
         public void Dispose()
