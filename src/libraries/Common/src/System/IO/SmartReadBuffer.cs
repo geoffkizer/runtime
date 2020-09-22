@@ -145,6 +145,46 @@ namespace System.Net
             return true;
         }
 
+        public async ValueTask<int> ReadUntilAsync(byte b, CancellationToken cancellationToken = default)
+        {
+            int scanned = 0;
+            while (true)
+            {
+                int index = ReadBuffer.Span.Slice(scanned).IndexOf(b);
+                if (index != -1)
+                {
+                    return scanned + index;
+                }
+
+                if (IsReadBufferFull || !await ReadIntoBufferAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return -1;
+                }
+
+                scanned = ReadBuffer.Length;
+            }
+        }
+
+        public int ReadUntil(byte b)
+        {
+            int scanned = 0;
+            while (true)
+            {
+                int index = ReadBuffer.Span.Slice(scanned).IndexOf(b);
+                if (index != -1)
+                {
+                    return scanned + index;
+                }
+
+                if (IsReadBufferFull || !ReadIntoBuffer())
+                {
+                    return -1;
+                }
+
+                scanned = ReadBuffer.Length;
+            }
+        }
+
         public void Consume(int bytesToConsume)
         {
             if (bytesToConsume < 0 || bytesToConsume > _readLength)
