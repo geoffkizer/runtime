@@ -50,7 +50,7 @@ namespace System.Net.Http
         private readonly WeakReference<HttpConnection> _weakThisRef;
 
         private HttpRequestMessage? _currentRequest;
-        private SmartWriteBufferStream _smartWriteBuffer;
+        private SmartWriteBuffer _smartWriteBuffer;
 
         private int _allowedReadLineBytes;
         /// <summary>Reusable array used to get the values for each header being written to the wire.</summary>
@@ -58,7 +58,7 @@ namespace System.Net.Http
 
         private ValueTask? _readAheadTask;
         private int _readAheadTaskLock; // 0 == free, 1 == held
-        private SmartReadBufferStream _smartReadBuffer;
+        private SmartReadBuffer _smartReadBuffer;
 
         private bool _inUse;
         private bool _canRetry;
@@ -85,8 +85,8 @@ namespace System.Net.Http
 
             _transportContext = transportContext;
 
-            _smartWriteBuffer = new SmartWriteBufferStream(stream, InitialWriteBufferSize);
-            _smartReadBuffer = new SmartReadBufferStream(stream, InitialReadBufferSize);
+            _smartWriteBuffer = new SmartWriteBuffer(stream, InitialWriteBufferSize);
+            _smartReadBuffer = new SmartReadBuffer(stream, InitialReadBufferSize);
 
             _weakThisRef = new WeakReference<HttpConnection>(this);
 
@@ -1063,34 +1063,120 @@ namespace System.Net.Http
 
         private void Write(ReadOnlySpan<byte> source)
         {
-            _smartWriteBuffer.Write(source);
-        }
+            int remaining = WriteBuffer.Length;
 
-        private ValueTask WriteAsync(ReadOnlyMemory<byte> source, bool async)
-        {
-            if (async)
+            if (source.Length <= remaining)
             {
-                return _smartWriteBuffer.WriteAsync(source);
+                // Fits in current write buffer.  Just copy and return.
+                WriteToBuffer(source);
+                return;
+            }
+
+            if (_smartWriteBuffer.HasBufferedBytes)
+            {
+                // Fit what we can in the current write buffer and flush it.
+                WriteToBuffer(source.Slice(0, remaining));
+                source = source.Slice(remaining);
+                Flush();
+            }
+
+            if (source.Length >= _smartWriteBuffer.WriteBufferCapacity)
+            {
+                // Large write.  No sense buffering this.  Write directly to stream.
+                WriteToStream(source);
             }
             else
             {
-                _smartWriteBuffer.Write(source.Span);
-                return ValueTask.CompletedTask;
+                // Copy remainder into buffer
+                WriteToBuffer(source);
             }
         }
 
-        // NOTE: This will result in unnecessary copies in some cases. Consider if we care about this.
+        private async ValueTask WriteAsync(ReadOnlyMemory<byte> source, bool async)
+        {
+            int remaining = WriteBuffer.Length;
+
+            if (source.Length <= remaining)
+            {
+                // Fits in current write buffer.  Just copy and return.
+                WriteToBuffer(source);
+                return;
+            }
+
+            if (_smartWriteBuffer.HasBufferedBytes)
+            {
+                // Fit what we can in the current write buffer and flush it.
+                WriteToBuffer(source.Slice(0, remaining));
+                source = source.Slice(remaining);
+                await FlushAsync(async).ConfigureAwait(false);
+            }
+
+            if (source.Length >= _smartWriteBuffer.WriteBufferCapacity)
+            {
+                // Large write.  No sense buffering this.  Write directly to stream.
+                await WriteToStreamAsync(source, async).ConfigureAwait(false);
+            }
+            else
+            {
+                // Copy remainder into buffer
+                WriteToBuffer(source);
+            }
+        }
 
         private void WriteWithoutBuffering(ReadOnlySpan<byte> source)
         {
-            Write(source);
-            Flush();
+            if (_smartWriteBuffer.HasBufferedBytes)
+            {
+                int remaining = WriteBuffer.Length;
+                if (source.Length <= remaining)
+                {
+                    // There's something already in the write buffer, but the content
+                    // we're writing can also fit after it in the write buffer.  Copy
+                    // the content to the write buffer and then flush it, so that we
+                    // can do a single send rather than two.
+                    WriteToBuffer(source);
+                    Flush();
+                    return;
+                }
+
+                // There's data in the write buffer and the data we're writing doesn't fit after it.
+                // Do two writes, one to flush the buffer and then another to write the supplied content.
+                Flush();
+            }
+
+            WriteToStream(source);
         }
 
-        private async ValueTask WriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
+        // TODO: Why is this so different than above?
+        private ValueTask WriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
         {
-            await WriteAsync(source, async).ConfigureAwait(false);
+            if (!_smartWriteBuffer.HasBufferedBytes)
+            {
+                // There's nothing in the write buffer we need to flush.
+                // Just write the supplied data out to the stream.
+                return WriteToStreamAsync(source, async);
+            }
+
+            int remaining = WriteBuffer.Length;
+            if (source.Length <= remaining)
+            {
+                // There's something already in the write buffer, but the content
+                // we're writing can also fit after it in the write buffer.  Copy
+                // the content to the write buffer and then flush it, so that we
+                // can do a single send rather than two.
+                WriteToBuffer(source);
+                return FlushAsync(async);
+            }
+
+            // There's data in the write buffer and the data we're writing doesn't fit after it.
+            // Do two writes, one to flush the buffer and then another to write the supplied content.
+            return FlushThenWriteWithoutBufferingAsync(source, async);
+        }
+
+        private async ValueTask FlushThenWriteWithoutBufferingAsync(ReadOnlyMemory<byte> source, bool async)
+        {
             await FlushAsync(async).ConfigureAwait(false);
+            await WriteToStreamAsync(source, async).ConfigureAwait(false);
         }
 
         private Task WriteByteAsync(byte b, bool async)
@@ -1280,6 +1366,27 @@ namespace System.Net.Http
             }
         }
 
+        private void WriteToStream(ReadOnlySpan<byte> source)
+        {
+            if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
+            _stream.Write(source);
+        }
+
+        private ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> source, bool async)
+        {
+            if (NetEventSource.Log.IsEnabled()) Trace($"Writing {source.Length} bytes.");
+
+            if (async)
+            {
+                return _stream.WriteAsync(source);
+            }
+            else
+            {
+                _stream.Write(source.Span);
+                return default;
+            }
+        }
+
         private bool TryReadNextLine(out ReadOnlySpan<byte> line)
         {
             var buffer = RemainingBuffer.Span;
@@ -1436,26 +1543,139 @@ namespace System.Net.Http
             }
         }
 
+        // TODO: Some of this logic seems like it could be cleaned up, a lot...
+
+        private void ReadFromBuffer(Span<byte> buffer)
+        {
+            Debug.Assert(buffer.Length <= RemainingBuffer.Length);
+
+            RemainingBuffer.Span.Slice(0, buffer.Length).CopyTo(buffer);
+            ConsumeFromRemainingBuffer(buffer.Length);
+        }
+
         private int Read(Span<byte> destination)
         {
             // This is called when reading the response body.
-            return _smartReadBuffer.Read(destination);
+
+            int remaining = RemainingBuffer.Length;
+            if (remaining > 0)
+            {
+                // We have data in the read buffer.  Return it to the caller.
+                if (destination.Length <= remaining)
+                {
+                    ReadFromBuffer(destination);
+                    return destination.Length;
+                }
+                else
+                {
+                    ReadFromBuffer(destination.Slice(0, remaining));
+                    return remaining;
+                }
+            }
+
+            // No data in read buffer.
+            // Do an unbuffered read directly against the underlying stream.
+            Debug.Assert(_readAheadTask == null, "Read ahead task should have been consumed as part of the headers.");
+            int count = _stream.Read(destination);
+            if (NetEventSource.Log.IsEnabled()) Trace($"Received {count} bytes.");
+            return count;
         }
 
-        private ValueTask<int> ReadAsync(Memory<byte> destination)
+        private async ValueTask<int> ReadAsync(Memory<byte> destination)
         {
             // This is called when reading the response body.
-            return _smartReadBuffer.ReadAsync(destination);
+
+            int remaining = RemainingBuffer.Length;
+            if (remaining > 0)
+            {
+                // We have data in the read buffer.  Return it to the caller.
+                if (destination.Length <= remaining)
+                {
+                    ReadFromBuffer(destination.Span);
+                    return destination.Length;
+                }
+                else
+                {
+                    ReadFromBuffer(destination.Span.Slice(0, remaining));
+                    return remaining;
+                }
+            }
+
+            // No data in read buffer.
+            // Do an unbuffered read directly against the underlying stream.
+            Debug.Assert(_readAheadTask == null, "Read ahead task should have been consumed as part of the headers.");
+            int count = await _stream.ReadAsync(destination).ConfigureAwait(false);
+            if (NetEventSource.Log.IsEnabled()) Trace($"Received {count} bytes.");
+            return count;
         }
 
         private int ReadBuffered(Span<byte> destination)
         {
-            return Read(destination);
+            // This is called when reading the response body.
+            Debug.Assert(destination.Length != 0);
+
+            int remaining = RemainingBuffer.Length;
+            if (remaining > 0)
+            {
+                // We have data in the read buffer.  Return it to the caller.
+                if (destination.Length <= remaining)
+                {
+                    ReadFromBuffer(destination);
+                    return destination.Length;
+                }
+                else
+                {
+                    ReadFromBuffer(destination.Slice(0, remaining));
+                    return remaining;
+                }
+            }
+
+            // No data in read buffer.
+            Fill();
+
+            // Hand back as much data as we can fit.
+            int bytesToCopy = Math.Min(RemainingBuffer.Length, destination.Length);
+            ReadFromBuffer(destination.Slice(0, bytesToCopy));
+            return bytesToCopy;
         }
 
         private ValueTask<int> ReadBufferedAsync(Memory<byte> destination)
         {
-            return ReadAsync(destination);
+            // If the caller provided buffer, and thus the amount of data desired to be read,
+            // is larger than the internal buffer, there's no point going through the internal
+            // buffer, so just do an unbuffered read.
+            return destination.Length >= RemainingBuffer.Length ?
+                ReadAsync(destination) :
+                ReadBufferedAsyncCore(destination);
+        }
+
+        private async ValueTask<int> ReadBufferedAsyncCore(Memory<byte> destination)
+        {
+            // This is called when reading the response body.
+
+            int remaining = RemainingBuffer.Length;
+            if (remaining > 0)
+            {
+                // We have data in the read buffer.  Return it to the caller.
+                if (destination.Length <= remaining)
+                {
+                    ReadFromBuffer(destination.Span);
+                    return destination.Length;
+                }
+                else
+                {
+                    ReadFromBuffer(destination.Span.Slice(0, remaining));
+                    return remaining;
+                }
+            }
+
+            // No data in read buffer.
+            await FillAsync(async: true).ConfigureAwait(false);
+
+            // Hand back as much data as we can fit.
+            int bytesToCopy = Math.Min(RemainingBuffer.Length, destination.Length);
+            ReadFromBuffer(destination.Slice(0, bytesToCopy).Span);
+            return bytesToCopy;
         }
 
         private async ValueTask CopyFromBufferAsync(Stream destination, bool async, int count, CancellationToken cancellationToken)

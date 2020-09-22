@@ -40,6 +40,8 @@ namespace System.Net
 
         public int WriteBufferCapacity => _writeBufferCapacity;
 
+        public bool HasBufferedBytes => _writeLength > 0;
+
         public bool IsWriteBufferFull => _writeLength == _writeBufferCapacity;
 
         private ReadOnlyMemory<byte> BufferedWriteBytes => new ReadOnlyMemory<byte>(_writeBuffer, 0, _writeLength);
