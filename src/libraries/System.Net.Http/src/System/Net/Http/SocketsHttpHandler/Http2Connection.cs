@@ -24,8 +24,8 @@ namespace System.Net.Http
         private readonly HttpConnectionPool _pool;
         private readonly Stream _stream;
 
-        private readonly SmartReadBufferStream _smartReadBuffer;
-        private readonly SmartWriteBufferStream _smartWriteBuffer;
+        private readonly SmartReadBuffer _smartReadBuffer;
+        private readonly SmartWriteBuffer _smartWriteBuffer;
 
         /// <summary>Reusable array used to get the values for each header being written to the wire.</summary>
         [ThreadStatic]
@@ -120,8 +120,8 @@ namespace System.Net.Http
         {
             _pool = pool;
             _stream = stream;
-            _smartReadBuffer = new SmartReadBufferStream(stream, InitialConnectionBufferSize);
-            _smartWriteBuffer = new SmartWriteBufferStream(stream, InitialConnectionBufferSize);
+            _smartReadBuffer = new SmartReadBuffer(stream, InitialConnectionBufferSize);
+            _smartWriteBuffer = new SmartWriteBuffer(stream, InitialConnectionBufferSize);
 
             _hpackDecoder = new HPackDecoder(maxHeadersLength: pool.Settings._maxResponseHeadersLength * 1024);
 
