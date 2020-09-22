@@ -22,8 +22,6 @@
 
   <ItemGroup>
     <Compile Include="System\Net\BaseStream.cs" />
-    <Compile Include="System\Net\SmartReadBufferStream.cs" />
-    <Compile Include="System\Net\SmartWriteBufferStream.cs" />
     <Compile Include="System\Net\Http\ByteArrayContent.cs" />
     <Compile Include="System\Net\Http\ByteArrayHelpers.cs" />
     <Compile Include="System\Net\Http\CancellationHelper.cs" />
