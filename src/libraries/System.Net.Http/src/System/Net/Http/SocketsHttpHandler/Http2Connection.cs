@@ -257,7 +257,7 @@ namespace System.Net.Http
 
             // Ensure we've read enough data for the frame header.
             EnsureReadBufferCapacity(FrameHeader.Size);
-            if (!await _smartReadBuffer.ReadAtLeastAsync(FrameHeader.Size).ConfigureAwait(false))
+            if (!await _smartReadBuffer.FillToAsync(FrameHeader.Size).ConfigureAwait(false))
             {
                 if (ReadBuffer.Length == 0)
                 {
@@ -286,7 +286,7 @@ namespace System.Net.Http
 
             // Ensure we've read the frame contents into our buffer.
             EnsureReadBufferCapacity(frameHeader.PayloadLength);
-            if (!await _smartReadBuffer.ReadAtLeastAsync(frameHeader.PayloadLength).ConfigureAwait(false))
+            if (!await _smartReadBuffer.FillToAsync(frameHeader.PayloadLength).ConfigureAwait(false))
             {
                 ThrowPrematureEOF(frameHeader.PayloadLength);
             }

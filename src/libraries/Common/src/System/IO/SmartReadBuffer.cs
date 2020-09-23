@@ -69,7 +69,12 @@ namespace System.Net
             return new Memory<byte>(_readBuffer, _readLength, _readBufferCapacity - _readLength);
         }
 
-        public async ValueTask<bool> ReadIntoBufferAsync(CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Read more data into the read buffer from the underlying Stream.
+        /// </summary>
+        /// <returns>True on success; false if no data could be read because the underlying Stream is at EOF.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public async ValueTask<bool> FillAsync(CancellationToken cancellationToken = default)
         {
             Memory<byte> availableReadBuffer = AdjustBufferForRead();
 
@@ -83,7 +88,12 @@ namespace System.Net
             return true;
         }
 
-        public bool ReadIntoBuffer()
+        /// <summary>
+        /// Read more data into the read buffer from the underlying Stream.
+        /// </summary>
+        /// <returns>True on success; false if no data could be read because the underlying Stream is at EOF.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public bool Fill()
         {
             Memory<byte> availableReadBuffer = AdjustBufferForRead();
 
@@ -97,7 +107,13 @@ namespace System.Net
             return true;
         }
 
-        public async ValueTask<bool> ReadAtLeastAsync(int bytesNeeded, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Read into the buffer until it contains at least the specified number of bytes.
+        /// If the buffer already contains at least the specified number of bytes, this does nothing.
+        /// </summary>
+        /// <returns>True on success; false there was not enough data because the underlying Stream is at EOF.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public async ValueTask<bool> FillToAsync(int bytesNeeded, CancellationToken cancellationToken = default)
         {
             if (ReadBuffer.Length >= bytesNeeded)
             {
@@ -111,7 +127,7 @@ namespace System.Net
 
             do
             {
-                if (!await ReadIntoBufferAsync(cancellationToken).ConfigureAwait(false))
+                if (!await FillAsync(cancellationToken).ConfigureAwait(false))
                 {
                     return false;
                 }
@@ -121,7 +137,13 @@ namespace System.Net
             return true;
         }
 
-        public bool ReadAtLeast(int bytesNeeded)
+        /// <summary>
+        /// Read into the buffer until it contains at least the specified number of bytes.
+        /// If the buffer already contains at least the specified number of bytes, this does nothing.
+        /// </summary>
+        /// <returns>True on success; false there was not enough data because the underlying Stream is at EOF.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public bool FillTo(int bytesNeeded)
         {
             if (ReadBuffer.Length >= bytesNeeded)
             {
@@ -135,7 +157,7 @@ namespace System.Net
 
             do
             {
-                if (!ReadIntoBuffer())
+                if (!Fill())
                 {
                     return false;
                 }
@@ -145,7 +167,12 @@ namespace System.Net
             return true;
         }
 
-        public async ValueTask<int> ReadUntilAsync(byte b, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Read into the buffer until the specified byte is found.
+        /// </summary>
+        /// <returns>On success, the index of the specified byte within the buffer. If the underlying stream is at EOF and the buffer does not contain the specified byte, returns -1.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public async ValueTask<int> FillUntilAsync(byte b, CancellationToken cancellationToken = default)
         {
             int scanned = 0;
             while (true)
@@ -156,7 +183,7 @@ namespace System.Net
                     return scanned + index;
                 }
 
-                if (IsReadBufferFull || !await ReadIntoBufferAsync(cancellationToken).ConfigureAwait(false))
+                if (IsReadBufferFull || !await FillAsync(cancellationToken).ConfigureAwait(false))
                 {
                     return -1;
                 }
@@ -165,7 +192,12 @@ namespace System.Net
             }
         }
 
-        public int ReadUntil(byte b)
+        /// <summary>
+        /// Read into the buffer until the specified byte is found.
+        /// </summary>
+        /// <returns>On success, the index of the specified byte within the buffer. If the underlying stream is at EOF and the buffer does not contain the specified byte, returns -1.</returns>
+        /// <exception cref="InvalidOperationException">No more room in the buffer.</exception>
+        public int FillUntil(byte b)
         {
             int scanned = 0;
             while (true)
@@ -176,7 +208,7 @@ namespace System.Net
                     return scanned + index;
                 }
 
-                if (IsReadBufferFull || !ReadIntoBuffer())
+                if (IsReadBufferFull || !Fill())
                 {
                     return -1;
                 }
@@ -185,6 +217,9 @@ namespace System.Net
             }
         }
 
+        /// <summary>
+        /// Consume bytes from the buffer that are no longer needed.
+        /// </summary>
         public void Consume(int bytesToConsume)
         {
             if (bytesToConsume < 0 || bytesToConsume > _readLength)
@@ -196,6 +231,9 @@ namespace System.Net
             _readLength -= bytesToConsume;
         }
 
+        /// <summary>
+        /// Set the read buffer capacity.
+        /// </summary>
         public void SetReadBufferCapacity(int capacity)
         {
             if (capacity < 0)

@@ -1534,8 +1534,8 @@ namespace System.Net.Http
             }
 
             bool success = async ?
-                await _smartReadBuffer.ReadIntoBufferAsync().ConfigureAwait(false) :
-                _smartReadBuffer.ReadIntoBuffer();
+                await _smartReadBuffer.FillAsync().ConfigureAwait(false) :
+                _smartReadBuffer.Fill();
 
             if (!success)
             {
