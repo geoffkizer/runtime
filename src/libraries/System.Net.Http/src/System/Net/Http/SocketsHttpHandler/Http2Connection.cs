@@ -197,7 +197,7 @@ namespace System.Net.Http
             BinaryPrimitives.WriteUInt32BigEndian(WriteBuffer.Span, ConnectionWindowSize - DefaultInitialWindowSize);
             AdvanceWriteBuffer(4);
 
-            await _smartWriteBuffer.WriteFromBufferAsync().ConfigureAwait(false);
+            await _smartWriteBuffer.FlushAsync().ConfigureAwait(false);
 
             _expectingSettingsAck = true;
 
@@ -211,7 +211,7 @@ namespace System.Net.Http
 
             try
             {
-                await _smartWriteBuffer.WriteFromBufferAsync().ConfigureAwait(false);
+                await _smartWriteBuffer.FlushAsync().ConfigureAwait(false);
             }
             catch (Exception e)
             {

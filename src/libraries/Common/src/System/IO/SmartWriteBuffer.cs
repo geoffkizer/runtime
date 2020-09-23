@@ -46,7 +46,7 @@ namespace System.Net
 
         private ReadOnlyMemory<byte> BufferedWriteBytes => new ReadOnlyMemory<byte>(_writeBuffer, 0, _writeLength);
 
-        public async ValueTask WriteFromBufferAsync(CancellationToken cancellationToken = default)
+        public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
         {
             if (_writeLength > 0)
             {
@@ -56,7 +56,7 @@ namespace System.Net
             }
         }
 
-        public void WriteFromBuffer()
+        public void Flush()
         {
             if (_writeLength > 0)
             {
@@ -108,17 +108,6 @@ namespace System.Net
 
                 _writeBufferCapacity = capacity;
             }
-        }
-
-        private int WriteIntoBuffer(ReadOnlySpan<byte> buffer)
-        {
-            Span<byte> writeBuffer = WriteBuffer.Span;
-
-            int bytesToWrite = Math.Min(writeBuffer.Length, buffer.Length);
-            buffer.Slice(0, bytesToWrite).CopyTo(writeBuffer);
-            Advance(bytesToWrite);
-
-            return bytesToWrite;
         }
 
         public void Dispose()

@@ -1350,18 +1350,18 @@ namespace System.Net.Http
 
         private void Flush()
         {
-            _smartWriteBuffer.WriteFromBuffer();
+            _smartWriteBuffer.Flush();
         }
 
         private ValueTask FlushAsync(bool async)
         {
             if (async)
             {
-                return _smartWriteBuffer.WriteFromBufferAsync();
+                return _smartWriteBuffer.FlushAsync();
             }
             else
             {
-                _smartWriteBuffer.WriteFromBuffer();
+                _smartWriteBuffer.Flush();
                 return ValueTask.CompletedTask;
             }
         }
