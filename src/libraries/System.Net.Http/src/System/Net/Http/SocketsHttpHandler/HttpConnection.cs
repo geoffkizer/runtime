@@ -589,14 +589,16 @@ namespace System.Net.Http
                 }
 
                 // Parse the response headers.  Logic after this point depends on being able to examine headers in the response object.
-                while (true)
+                bool headersDone = false;
+                do
                 {
-                    ReadOnlyMemory<byte> line = await ReadNextResponseHeaderLineAsync(async, foldedHeadersAllowed: true).ConfigureAwait(false);
-                    if (!TryParseHeaderNameValue(this, line.Span, response, isFromTrailer: false))
+                    lineLength = await ReadNextResponseHeaderLineAsync(async, foldedHeadersAllowed: true).ConfigureAwait(false);
+                    if (!TryParseHeaderNameValue(lineLength, response, isFromTrailer: false))
                     {
-                        break;
+                        headersDone = true;
                     }
-                }
+                    ConsumeFromRemainingBuffer(lineLength);
+                } while (!headersDone);
 
                 if (HttpTelemetry.Log.IsEnabled()) HttpTelemetry.Log.ResponseHeadersStop();
 
@@ -981,17 +983,21 @@ namespace System.Net.Http
                 throw new HttpRequestException(SR.Format(SR.net_http_invalid_response_status_line, Encoding.ASCII.GetString(line)));
             }
         }
-        private static bool TryParseHeaderNameValue(HttpConnection connection, ReadOnlySpan<byte> line, HttpResponseMessage response, bool isFromTrailer)
+
+        private bool TryParseHeaderNameValue(int lineLength, HttpResponseMessage response, bool isFromTrailer)
         {
+            ReadOnlySpan<byte> line = TrimLineEnd(RemainingBuffer.Span.Slice(0, lineLength));
+
             if (line.Length == 0)
             {
                 return false;
             }
 
-            ParseHeaderNameValue(connection, line, response, isFromTrailer);
+            ParseHeaderNameValue(this, line, response, isFromTrailer);
             return true;
         }
 
+        // TODO: why is this a static that takes the HttpConnection???
         private static void ParseHeaderNameValue(HttpConnection connection, ReadOnlySpan<byte> line, HttpResponseMessage response, bool isFromTrailer)
         {
             Debug.Assert(line.Length > 0);
@@ -1449,9 +1455,9 @@ namespace System.Net.Http
         }
 
         // What I really want to do is
-        // (1) return the line length here, incl \n
+        // (1) DONE return the line length here, incl \n
         // (2) DONE don't trim \r here
-        // (3) don't consume here
+        // (3) DONE don't consume here
         // (4) use ReadUntil
         // (5) figure out something about the allowed read bytes.
         private async ValueTask<int> ReadNextResponseHeaderLineAsync2(bool async)
@@ -1484,7 +1490,13 @@ namespace System.Net.Http
             }
         }
 
-        private async ValueTask<ReadOnlyMemory<byte>> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)
+        // Same as above
+        // (1) return the line length here, incl \n
+        // (2) DONE don't trim \r here
+        // (3) don't consume here
+        // (4) ????
+        // (5) figure out something about the allowed read bytes.
+        private async ValueTask<int> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)
         {
             Debug.Assert(foldedHeadersAllowed);
             int previouslyScannedBytes = 0;
@@ -1564,13 +1576,13 @@ namespace System.Net.Http
                     _allowedReadLineBytes -= realLfIndex + 1 - previouslyScannedBytes;
                     ThrowIfExceededAllowedReadLineBytes();
 
-                    ReadOnlyMemory<byte> line = RemainingBuffer.Slice(0, length);
+                    //ReadOnlyMemory<byte> line = RemainingBuffer.Slice(0, previouslyScannedBytes + lfIndex + 1);
 
                     // Note this isn't quite kosher because we shouldn't consume the bytes while we are still using them.
                     // However, as long as we don't do another read, it will be fine.
-                    ConsumeFromRemainingBuffer(previouslyScannedBytes + lfIndex + 1);
+                    //ConsumeFromRemainingBuffer(previouslyScannedBytes + lfIndex + 1);
 
-                    return line;
+                    return previouslyScannedBytes + lfIndex + 1;
                 }
 
                 // Couldn't find LF.  Read more. Note this may cause _readOffset to change.
