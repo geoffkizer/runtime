@@ -1490,10 +1490,46 @@ namespace System.Net.Http
             }
         }
 
+        // Returns true if folded header was found
+        private bool HandleFoldedHeader(int lineLength)
+        {
+            ReadOnlySpan<byte> buffer = RemainingBuffer.Span;
+
+            Debug.Assert(buffer[lineLength - 1] == (byte)'\n', "expected LF at end of line");
+            Debug.Assert(buffer.Length > lineLength, "buffer should have at least one additional byte after line");
+
+            byte nextByte = buffer[lineLength];
+            if (nextByte == (byte)' ' || nextByte == (byte)'\t')
+            {
+                // Hackety hack
+                // When we return the line, we need the interim newlines filtered out. According
+                // to RFC 7230 3.2.4, a valid approach to dealing with them is to "replace each
+                // received obs-fold with one or more SP octets prior to interpreting the field
+                // value or forwarding the message downstream", so that's what we do.
+                // Warning: hack
+                Span<byte> span = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(buffer), buffer.Length);
+                span[lineLength - 1] = (byte)' ';
+                if (lineLength >= 2 && span[lineLength - 2] == (byte)'\r')
+                {
+                    span[lineLength - 2] = (byte)' ';
+                }
+
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        // A thought:
+        // We should be able to handle _allowedReadLineBytes by doing a check against it before we call FillAsync, as we do in ReadNextResponseHeaderLineAsync2 above.
+
+
         // Same as above
-        // (1) return the line length here, incl \n
+        // (1) DONE return the line length here, incl \n
         // (2) DONE don't trim \r here
-        // (3) don't consume here
+        // (3) DONE don't consume here
         // (4) ????
         // (5) figure out something about the allowed read bytes.
         private async ValueTask<int> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)
@@ -1536,6 +1572,7 @@ namespace System.Net.Http
                             continue;
                         }
 
+#if false
                         // We have at least one more character we can look at.
                         //Debug.Assert(lfIndex + 1 < _readLength);
                         char nextChar = (char)buffer.Span[realLfIndex + 1];
@@ -1543,13 +1580,15 @@ namespace System.Net.Http
                         {
                             // The next header is a continuation.
 
+                            // TODO: Not sure this should be hacked out 
+#if false
                             // Folded headers are only allowed within header field values, not within header field names,
                             // so if we haven't seen a colon, this is invalid.
                             if (buffer.Span.Slice(0, length).IndexOf((byte)':') == -1)
                             {
                                 throw new HttpRequestException(SR.net_http_invalid_response_header_folder);
                             }
-
+#endif
                             // When we return the line, we need the interim newlines filtered out. According
                             // to RFC 7230 3.2.4, a valid approach to dealing with them is to "replace each
                             // received obs-fold with one or more SP octets prior to interpreting the field
@@ -1562,6 +1601,16 @@ namespace System.Net.Http
                                 m.Span[realLfIndex - 1] = (byte)' ';
                             }
 
+                            // Update how much we've read, and simply go back to search for the next newline.
+                            previouslyScannedBytes = (lfIndex + 1);
+                            _allowedReadLineBytes -= (lfIndex + 1);
+                            ThrowIfExceededAllowedReadLineBytes();
+                            continue;
+                        }
+#endif
+
+                        if (HandleFoldedHeader(realLfIndex + 1))
+                        {
                             // Update how much we've read, and simply go back to search for the next newline.
                             previouslyScannedBytes = (lfIndex + 1);
                             _allowedReadLineBytes -= (lfIndex + 1);
