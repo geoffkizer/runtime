@@ -1458,15 +1458,17 @@ namespace System.Net.Http
                     int length = realLfIndex + 1;
 
                     // Advance read position past the LF
-                    _allowedReadLineBytes -= realLfIndex + 1 - previouslyScannedBytes;
+                    _allowedReadLineBytes -= length;
                     ThrowIfExceededAllowedReadLineBytes();
 
                     return length;
                 }
 
                 // Couldn't find LF.  Read more.
-                _allowedReadLineBytes -= RemainingBuffer.Length - previouslyScannedBytes;
-                ThrowIfExceededAllowedReadLineBytes();
+                if (_allowedReadLineBytes < buffer.Length)
+                {
+                    throw new HttpRequestException(SR.Format(SR.net_http_response_headers_exceeded_length, _pool.Settings._maxResponseHeadersLength * 1024L));
+                }
 
                 previouslyScannedBytes = RemainingBuffer.Length;
                 await FillAsync(async).ConfigureAwait(false);
