@@ -205,6 +205,7 @@ namespace System.Net.Http
 
         public HttpConnectionKind Kind => _pool.Kind;
 
+        // TODO: Rename these, similar to Http2, or remove them
         private int ReadBufferSize => _smartReadBuffer.ReadBuffer.Length;
 
         private ReadOnlyMemory<byte> RemainingBuffer => _smartReadBuffer.ReadBuffer;
@@ -534,7 +535,9 @@ namespace System.Net.Http
 
                 // Parse the response status line.
                 var response = new HttpResponseMessage() { RequestMessage = request, Content = new HttpConnectionResponseContent() };
-                ParseStatusLine((await ReadNextResponseHeaderLineAsync(async).ConfigureAwait(false)).Span, response);
+                int lineLength = await ReadNextResponseHeaderLineAsync2(async).ConfigureAwait(false);
+                ParseStatusLine(RemainingBuffer.Span.Slice(0, lineLength), response);
+                ConsumeFromRemainingBuffer(lineLength);
 
                 if (HttpTelemetry.Log.IsEnabled()) HttpTelemetry.Log.ResponseHeadersStart();
 
@@ -568,17 +571,28 @@ namespace System.Net.Http
 
                     // Discard headers that come with the interim 1xx responses.
                     // RFC7231: 1xx responses are terminated by the first empty line after the status-line.
-                    while (!IsLineEmpty(await ReadNextResponseHeaderLineAsync(async).ConfigureAwait(false)));
+                    bool done = false;
+                    do
+                    {
+                        lineLength = await ReadNextResponseHeaderLineAsync2(async).ConfigureAwait(false);
+                        if (TrimLineEnd(RemainingBuffer.Span.Slice(0, lineLength)).Length == 0)
+                        {
+                            done = true;
+                        }
+                        ConsumeFromRemainingBuffer(lineLength);
+                    } while (!done);
 
                     // Parse the status line for next response.
-                    ParseStatusLine((await ReadNextResponseHeaderLineAsync(async).ConfigureAwait(false)).Span, response);
+                    lineLength = await ReadNextResponseHeaderLineAsync2(async).ConfigureAwait(false);
+                    ParseStatusLine(RemainingBuffer.Span.Slice(0, lineLength), response);
+                    ConsumeFromRemainingBuffer(lineLength);
                 }
 
                 // Parse the response headers.  Logic after this point depends on being able to examine headers in the response object.
                 while (true)
                 {
                     ReadOnlyMemory<byte> line = await ReadNextResponseHeaderLineAsync(async, foldedHeadersAllowed: true).ConfigureAwait(false);
-                    if (IsLineEmpty(line))
+                    if (line.Length == 0)
                     {
                         break;
                     }
@@ -831,8 +845,6 @@ namespace System.Net.Http
             }, _weakThisRef);
         }
 
-        private static bool IsLineEmpty(ReadOnlyMemory<byte> line) => line.Length == 0;
-
         private async ValueTask SendRequestContentAsync(HttpRequestMessage request, HttpContentWriteStream stream, bool async, CancellationToken cancellationToken)
         {
             // Now that we're sending content, prohibit retries on this connection.
@@ -897,6 +909,8 @@ namespace System.Net.Http
 
         private static void ParseStatusLine(ReadOnlySpan<byte> line, HttpResponseMessage response)
         {
+            line = TrimLineEnd(line);
+
             // We sent the request version as either 1.0 or 1.1.
             // We expect a response version of the form 1.X, where X is a single digit as per RFC.
 
@@ -1387,11 +1401,24 @@ namespace System.Net.Http
             }
         }
 
+        private static ReadOnlySpan<byte> TrimLineEnd(ReadOnlySpan<byte> line)
+        {
+            Debug.Assert(line.Length > 0);
+            Debug.Assert(line[line.Length - 1] == (byte)'\n');
+            int trimmedLength = line.Length - 1;
+            if (trimmedLength > 0 && line[trimmedLength - 1] == (byte)'\r')
+            {
+                trimmedLength--;
+            }
+
+            return line.Slice(0, trimmedLength);
+        }
+
         private bool TryReadNextLine(out ReadOnlySpan<byte> line)
         {
             var buffer = RemainingBuffer.Span;
-            int length = buffer.IndexOf((byte)'\n');
-            if (length < 0)
+            int length = buffer.IndexOf((byte)'\n') + 1;
+            if (length == 0)
             {
                 if (_allowedReadLineBytes < buffer.Length)
                 {
@@ -1402,13 +1429,48 @@ namespace System.Net.Http
                 return false;
             }
 
-            int bytesConsumed = length + 1;
-            ConsumeFromRemainingBuffer(bytesConsumed);
-            _allowedReadLineBytes -= bytesConsumed;
+            // int bytesConsumed = length + 1;
+            // ConsumeFromRemainingBuffer(bytesConsumed);
+            _allowedReadLineBytes -= length;
             ThrowIfExceededAllowedReadLineBytes();
 
-            line = buffer.Slice(0, length > 0 && buffer[length - 1] == '\r' ? length - 1 : length);
+            //line = buffer.Slice(0, length > 0 && buffer[length - 1] == '\r' ? length - 1 : length);
+            line = buffer.Slice(0, length);
             return true;
+        }
+
+        // What I really want to do is
+        // (1) return the line length here, incl \n
+        // (2) DONE don't trim \r here
+        // (3) don't consume here
+        // (4) use ReadUntil
+        // (5) figure out something about the allowed read bytes.
+        private async ValueTask<int> ReadNextResponseHeaderLineAsync2(bool async)
+        {
+            int previouslyScannedBytes = 0;
+            while (true)
+            {
+                ReadOnlyMemory<byte> buffer = RemainingBuffer;
+                int lfIndex = buffer.Span.Slice(previouslyScannedBytes).IndexOf((byte)'\n');
+                if (lfIndex >= 0)
+                {
+                    int realLfIndex = lfIndex + previouslyScannedBytes;
+                    int length = realLfIndex + 1;
+
+                    // Advance read position past the LF
+                    _allowedReadLineBytes -= realLfIndex + 1 - previouslyScannedBytes;
+                    ThrowIfExceededAllowedReadLineBytes();
+
+                    return length;
+                }
+
+                // Couldn't find LF.  Read more.
+                _allowedReadLineBytes -= RemainingBuffer.Length - previouslyScannedBytes;
+                ThrowIfExceededAllowedReadLineBytes();
+
+                previouslyScannedBytes = RemainingBuffer.Length;
+                await FillAsync(async).ConfigureAwait(false);
+            }
         }
 
         private async ValueTask<ReadOnlyMemory<byte>> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)

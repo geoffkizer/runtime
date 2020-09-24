@@ -282,10 +282,9 @@ namespace System.Net.Http
                             _chunkBytesRemaining = chunkSize;
 
                             // If there's a chunk extension after the chunk size, validate it.
-                            if (bytesConsumed != currentLine.Length)
-                            {
-                                ValidateChunkExtension(currentLine.Slice(bytesConsumed));
-                            }
+                            ValidateChunkExtension(currentLine.Slice(bytesConsumed));
+
+                            _connection.ConsumeFromRemainingBuffer(currentLine.Length);
 
                             // Proceed to handle the chunk.  If there's data in it, go read it.
                             // Otherwise, finish handling the response.
@@ -330,10 +329,12 @@ namespace System.Net.Http
                                 return default;
                             }
 
-                            if (currentLine.Length != 0)
+                            if (TrimLineEnd(currentLine).Length != 0)
                             {
-                                throw new HttpRequestException(SR.Format(SR.net_http_invalid_response_chunk_terminator_invalid, Encoding.ASCII.GetString(currentLine)));
+                                throw new HttpRequestException(SR.Format(SR.net_http_invalid_response_chunk_terminator_invalid, Encoding.ASCII.GetString(TrimLineEnd(currentLine))));
                             }
+
+                            _connection.ConsumeFromRemainingBuffer(currentLine.Length);
 
                             _state = ParsingState.ExpectChunkHeader;
                             goto case ParsingState.ExpectChunkHeader;
@@ -349,8 +350,12 @@ namespace System.Net.Http
                                     break;
                                 }
 
-                                if (currentLine.IsEmpty)
+                                // TODO: May not need this if I change ParseHeaderNameValue below
+                                ReadOnlySpan<byte> trimmedLine = TrimLineEnd(currentLine);
+                                if (trimmedLine.IsEmpty)
                                 {
+                                    _connection.ConsumeFromRemainingBuffer(currentLine.Length);
+
                                     // Dispose of the registration and then check whether cancellation has been
                                     // requested. This is necessary to make determinstic a race condition between
                                     // cancellation being requested and unregistering from the token.  Otherwise,
@@ -372,7 +377,9 @@ namespace System.Net.Http
                                 {
                                     // Make sure that we don't inadvertently consume trailing headers
                                     // while draining a connection that's being returned back to the pool.
-                                    HttpConnection.ParseHeaderNameValue(_connection, currentLine, _response, isFromTrailer: true);
+                                    HttpConnection.ParseHeaderNameValue(_connection, trimmedLine, _response, isFromTrailer: true);
+
+                                    _connection.ConsumeFromRemainingBuffer(currentLine.Length);
                                 }
                             }
 
@@ -400,6 +407,8 @@ namespace System.Net.Http
 
             private static void ValidateChunkExtension(ReadOnlySpan<byte> lineAfterChunkSize)
             {
+                lineAfterChunkSize = TrimLineEnd(lineAfterChunkSize);
+
                 // Until we see the ';' denoting the extension, the line after the chunk size
                 // must contain only tabs and spaces.  After the ';', anything goes.
                 for (int i = 0; i < lineAfterChunkSize.Length; i++)
