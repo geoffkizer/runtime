@@ -1435,21 +1435,14 @@ namespace System.Net.Http
             int length = buffer.IndexOf((byte)'\n') + 1;
             if (length == 0)
             {
-                if (_allowedReadLineBytes < buffer.Length)
-                {
-                    throw new HttpRequestException(SR.Format(SR.net_http_response_headers_exceeded_length, _pool.Settings._maxResponseHeadersLength * 1024L));
-                }
-
+                ThrowIfExceededAllowedReadLineBytes(buffer.Length);
                 line = default;
                 return false;
             }
 
-            // int bytesConsumed = length + 1;
-            // ConsumeFromRemainingBuffer(bytesConsumed);
             _allowedReadLineBytes -= length;
             ThrowIfExceededAllowedReadLineBytes();
 
-            //line = buffer.Slice(0, length > 0 && buffer[length - 1] == '\r' ? length - 1 : length);
             line = buffer.Slice(0, length);
             return true;
         }
@@ -1479,11 +1472,7 @@ namespace System.Net.Http
                 }
 
                 // Couldn't find LF.  Read more.
-                if (_allowedReadLineBytes < buffer.Length)
-                {
-                    throw new HttpRequestException(SR.Format(SR.net_http_response_headers_exceeded_length, _pool.Settings._maxResponseHeadersLength * 1024L));
-                }
-
+                ThrowIfExceededAllowedReadLineBytes(buffer.Length);
                 previouslyScannedBytes = RemainingBuffer.Length;
                 await FillAsync(async).ConfigureAwait(false);
             }
@@ -1565,8 +1554,7 @@ namespace System.Net.Http
                             // rescan the whole header, reposition to one character before
                             // the newline so that we'll find it quickly.
                             previouslyScannedBytes += lfIndex;
-                            _allowedReadLineBytes -= lfIndex;
-                            ThrowIfExceededAllowedReadLineBytes();
+                            ThrowIfExceededAllowedReadLineBytes(realLfIndex);
                             await FillAsync(async).ConfigureAwait(false);
                             continue;
                         }
@@ -1612,8 +1600,7 @@ namespace System.Net.Http
                         {
                             // Update how much we've read, and simply go back to search for the next newline.
                             previouslyScannedBytes = (lfIndex + 1);
-                            _allowedReadLineBytes -= (lfIndex + 1);
-                            ThrowIfExceededAllowedReadLineBytes();
+                            ThrowIfExceededAllowedReadLineBytes(realLfIndex + 1);
                             continue;
                         }
 
@@ -1621,21 +1608,14 @@ namespace System.Net.Http
                     }
 
                     // Advance read position past the LF
-                    _allowedReadLineBytes -= realLfIndex + 1 - previouslyScannedBytes;
+                    _allowedReadLineBytes -= realLfIndex + 1;
                     ThrowIfExceededAllowedReadLineBytes();
-
-                    //ReadOnlyMemory<byte> line = RemainingBuffer.Slice(0, previouslyScannedBytes + lfIndex + 1);
-
-                    // Note this isn't quite kosher because we shouldn't consume the bytes while we are still using them.
-                    // However, as long as we don't do another read, it will be fine.
-                    //ConsumeFromRemainingBuffer(previouslyScannedBytes + lfIndex + 1);
 
                     return previouslyScannedBytes + lfIndex + 1;
                 }
 
                 // Couldn't find LF.  Read more. Note this may cause _readOffset to change.
-                _allowedReadLineBytes -= RemainingBuffer.Length - previouslyScannedBytes;
-                ThrowIfExceededAllowedReadLineBytes();
+                ThrowIfExceededAllowedReadLineBytes(buffer.Length);
 
                 previouslyScannedBytes = RemainingBuffer.Length;
                 await FillAsync(async).ConfigureAwait(false);
@@ -1769,9 +1749,9 @@ namespace System.Net.Http
         }
 #endif
 
-        private void ThrowIfExceededAllowedReadLineBytes()
+        private void ThrowIfExceededAllowedReadLineBytes(int currentReadSize = 0)
         {
-            if (_allowedReadLineBytes < 0)
+            if (_allowedReadLineBytes < currentReadSize)
             {
                 throw new HttpRequestException(SR.Format(SR.net_http_response_headers_exceeded_length, _pool.Settings._maxResponseHeadersLength * 1024L));
             }
