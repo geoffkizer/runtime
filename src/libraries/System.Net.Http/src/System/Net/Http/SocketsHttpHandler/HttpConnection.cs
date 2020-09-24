@@ -592,11 +592,10 @@ namespace System.Net.Http
                 while (true)
                 {
                     ReadOnlyMemory<byte> line = await ReadNextResponseHeaderLineAsync(async, foldedHeadersAllowed: true).ConfigureAwait(false);
-                    if (line.Length == 0)
+                    if (!TryParseHeaderNameValue(this, line.Span, response, isFromTrailer: false))
                     {
                         break;
                     }
-                    ParseHeaderNameValue(this, line.Span, response, isFromTrailer: false);
                 }
 
                 if (HttpTelemetry.Log.IsEnabled()) HttpTelemetry.Log.ResponseHeadersStop();
@@ -981,6 +980,16 @@ namespace System.Net.Http
             {
                 throw new HttpRequestException(SR.Format(SR.net_http_invalid_response_status_line, Encoding.ASCII.GetString(line)));
             }
+        }
+        private static bool TryParseHeaderNameValue(HttpConnection connection, ReadOnlySpan<byte> line, HttpResponseMessage response, bool isFromTrailer)
+        {
+            if (line.Length == 0)
+            {
+                return false;
+            }
+
+            ParseHeaderNameValue(connection, line, response, isFromTrailer);
+            return true;
         }
 
         private static void ParseHeaderNameValue(HttpConnection connection, ReadOnlySpan<byte> line, HttpResponseMessage response, bool isFromTrailer)
@@ -1477,6 +1486,7 @@ namespace System.Net.Http
 
         private async ValueTask<ReadOnlyMemory<byte>> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)
         {
+            Debug.Assert(foldedHeadersAllowed);
             int previouslyScannedBytes = 0;
             while (true)
             {
