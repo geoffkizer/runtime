@@ -1498,7 +1498,6 @@ namespace System.Net.Http
                 // to RFC 7230 3.2.4, a valid approach to dealing with them is to "replace each
                 // received obs-fold with one or more SP octets prior to interpreting the field
                 // value or forwarding the message downstream", so that's what we do.
-                // Warning: hack
                 Span<byte> span = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(buffer), buffer.Length);
                 span[lineLength - 1] = (byte)' ';
                 if (lineLength >= 2 && span[lineLength - 2] == (byte)'\r')
@@ -1516,115 +1515,6 @@ namespace System.Net.Http
 
         // A thought:
         // We should be able to handle _allowedReadLineBytes by doing a check against it before we call FillAsync, as we do in ReadNextResponseHeaderLineAsync2 above.
-
-
-        // Same as above
-        // (1) DONE return the line length here, incl \n
-        // (2) DONE don't trim \r here
-        // (3) DONE don't consume here
-        // (4) ????
-        // (5) figure out something about the allowed read bytes.
-        private async ValueTask<int> ReadNextResponseHeaderLineAsync(bool async, bool foldedHeadersAllowed = false)
-        {
-            Debug.Assert(foldedHeadersAllowed);
-            int previouslyScannedBytes = 0;
-            while (true)
-            {
-                ReadOnlyMemory<byte> buffer = RemainingBuffer;
-                int lfIndex = buffer.Span.Slice(previouslyScannedBytes).IndexOf((byte)'\n');
-                if (lfIndex >= 0)
-                {
-                    int realLfIndex = lfIndex + previouslyScannedBytes;
-                    int length = realLfIndex;
-                    if (length > 0 && buffer.Span[length - 1] == '\r')
-                    {
-                        length--;
-                    }
-
-                    // If this isn't the ending header, we need to account for the possibility
-                    // of folded headers, which per RFC2616 are headers split across multiple
-                    // lines, where the continuation line begins with a space or horizontal tab.
-                    // The feature was deprecated in RFC 7230 3.2.4, but some servers still use it.
-                    if (foldedHeadersAllowed && length > 0)
-                    {
-                        // If the newline is the last character we've buffered, we need at least
-                        // one more character in order to see whether it's space/tab, in which
-                        // case it's a folded header.
-                        if (realLfIndex + 1 == buffer.Length)
-                        {
-                            // The LF is at the end of the buffer, so we need to read more
-                            // to determine whether there's a continuation.  We'll read
-                            // and then loop back around again, but to avoid needing to
-                            // rescan the whole header, reposition to one character before
-                            // the newline so that we'll find it quickly.
-                            previouslyScannedBytes += lfIndex;
-                            ThrowIfExceededAllowedReadLineBytes(realLfIndex);
-                            await FillAsync(async).ConfigureAwait(false);
-                            continue;
-                        }
-
-#if false
-                        // We have at least one more character we can look at.
-                        //Debug.Assert(lfIndex + 1 < _readLength);
-                        char nextChar = (char)buffer.Span[realLfIndex + 1];
-                        if (nextChar == ' ' || nextChar == '\t')
-                        {
-                            // The next header is a continuation.
-
-                            // TODO: Not sure this should be hacked out 
-#if false
-                            // Folded headers are only allowed within header field values, not within header field names,
-                            // so if we haven't seen a colon, this is invalid.
-                            if (buffer.Span.Slice(0, length).IndexOf((byte)':') == -1)
-                            {
-                                throw new HttpRequestException(SR.net_http_invalid_response_header_folder);
-                            }
-#endif
-                            // When we return the line, we need the interim newlines filtered out. According
-                            // to RFC 7230 3.2.4, a valid approach to dealing with them is to "replace each
-                            // received obs-fold with one or more SP octets prior to interpreting the field
-                            // value or forwarding the message downstream", so that's what we do.
-                            // Warning: hack
-                            Memory<byte> m = MemoryMarshal.AsMemory(buffer);
-                            m.Span[realLfIndex] = (byte)' ';
-                            if (m.Span[realLfIndex - 1] == '\r')
-                            {
-                                m.Span[realLfIndex - 1] = (byte)' ';
-                            }
-
-                            // Update how much we've read, and simply go back to search for the next newline.
-                            previouslyScannedBytes = (lfIndex + 1);
-                            _allowedReadLineBytes -= (lfIndex + 1);
-                            ThrowIfExceededAllowedReadLineBytes();
-                            continue;
-                        }
-#endif
-
-                        if (HandleFoldedHeader(realLfIndex + 1))
-                        {
-                            // Update how much we've read, and simply go back to search for the next newline.
-                            previouslyScannedBytes = (lfIndex + 1);
-                            ThrowIfExceededAllowedReadLineBytes(realLfIndex + 1);
-                            continue;
-                        }
-
-                        // Not at the end of a header with a continuation.
-                    }
-
-                    // Advance read position past the LF
-                    _allowedReadLineBytes -= realLfIndex + 1;
-                    ThrowIfExceededAllowedReadLineBytes();
-
-                    return previouslyScannedBytes + lfIndex + 1;
-                }
-
-                // Couldn't find LF.  Read more. Note this may cause _readOffset to change.
-                ThrowIfExceededAllowedReadLineBytes(buffer.Length);
-
-                previouslyScannedBytes = RemainingBuffer.Length;
-                await FillAsync(async).ConfigureAwait(false);
-            }
-        }
 
         private async ValueTask<int> ReadFoldedHeaderLineAsync(bool async, int lineLength)
         {
