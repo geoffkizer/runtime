@@ -80,8 +80,6 @@ namespace System.Net.Http
 
         public void AbortRead()
         {
-            bool signalWaiter;
-
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
             {
@@ -96,19 +94,12 @@ namespace System.Net.Http
                     _buffer.Discard(_buffer.ActiveLength);
                 }
 
-                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
-            }
-
-            if (signalWaiter)
-            {
-                _waitSource.SetResult(true);
+                SignalWaiter();
             }
         }
 
         public void Write(ReadOnlySpan<byte> buffer)
         {
-            bool signalWaiter;
-
             if (buffer.Length == 0)
             {
                 return;
@@ -131,19 +122,12 @@ namespace System.Net.Http
                 buffer.CopyTo(_buffer.AvailableSpan);
                 _buffer.Commit(buffer.Length);
 
-                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
-            }
-
-            if (signalWaiter)
-            {
-                _waitSource.SetResult(true);
+                SignalWaiter();
             }
         }
 
         public void EndWrite()
         {
-            bool signalWaiter;
-
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
             {
@@ -154,12 +138,7 @@ namespace System.Net.Http
 
                 _writeEnded = true;
 
-                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
-            }
-
-            if (signalWaiter)
-            {
-                _waitSource.SetResult(true);
+                SignalWaiter();
             }
         }
 
@@ -188,9 +167,8 @@ namespace System.Net.Http
                     return (false, 0);
                 }
 
-                _waitSource.Reset();
-                Debug.Assert(_hasWaiter == 0);
-                _hasWaiter = 1;
+                Reset();
+
                 return (true, 0);
             }
         }
@@ -253,6 +231,31 @@ namespace System.Net.Http
             _waitSource.GetResult(token);
         }
 
+        private void SignalWaiter()
+        {
+            if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
+            {
+                _waitSource.SetResult(true);
+            }
+        }
+
+        private void CancelWaiter()
+        {
+            if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
+            {
+                Debug.Assert(_waitSourceCancellationToken != default);
+                _waitSource.SetException(ExceptionDispatchInfo.SetCurrentStackTrace(new OperationCanceledException(_waitSourceCancellationToken)));
+            }
+        }
+
+        private void Reset()
+        {
+            Debug.Assert(_hasWaiter == 0);
+
+            _waitSource.Reset();
+            Volatile.Write(ref _hasWaiter, 1);
+        }
+
         private void WaitForData()
         {
             // See comments in WaitAsync.
@@ -270,18 +273,12 @@ namespace System.Net.Http
             // handled by _waitSource as one of its primary purposes.  We can't assert _hasWaiter here, though, as once we released the
             // lock, a producer could have seen _hasWaiter as true and both set it to false and signaled _waitSource.
 
-            // With HttpClient, the supplied cancellation token will always be cancelable, as HttpClient supplies a token that
-            // will have cancellation requested if CancelPendingRequests is called (or when a non-infinite Timeout expires).
-            // However, this could still be non-cancelable if HttpMessageInvoker was used, at which point this will only be
-            // cancelable if the caller's token was cancelable.
-
             _waitSourceCancellationToken = cancellationToken;
             _waitSourceCancellation = cancellationToken.UnsafeRegister(static s =>
             {
                 var thisRef = (StreamBuffer)s!;
 
-                bool signalWaiter = Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1;
-                if (signalWaiter)
+                if (Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1)
                 {
                     // Wake up the wait.  It will then immediately check whether cancellation was requested and throw if it was.
                     thisRef._waitSource.SetException(ExceptionDispatchInfo.SetCurrentStackTrace(
