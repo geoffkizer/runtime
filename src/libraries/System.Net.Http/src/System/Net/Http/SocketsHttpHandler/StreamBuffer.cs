@@ -157,7 +157,7 @@ namespace System.Net.Http
             {
                 // Synchronously block waiting for data to be produced.
                 Debug.Assert(bytesRead == 0);
-                _taskSource.WaitForData();
+                _taskSource.Wait();
                 (wait, bytesRead) = TryReadFromBuffer(buffer);
                 Debug.Assert(!wait);
             }
@@ -176,7 +176,7 @@ namespace System.Net.Http
             if (wait)
             {
                 Debug.Assert(bytesRead == 0);
-                await _taskSource.WaitForDataAsync(cancellationToken).ConfigureAwait(false);
+                await _taskSource.WaitAsync(cancellationToken).ConfigureAwait(false);
                 (wait, bytesRead) = TryReadFromBuffer(buffer.Span);
                 Debug.Assert(!wait);
             }
@@ -243,13 +243,13 @@ namespace System.Net.Http
                 Volatile.Write(ref _hasWaiter, 1);
             }
 
-            public void WaitForData()
+            public void Wait()
             {
                 _waitSource.RunContinuationsAsynchronously = false;
                 new ValueTask(this, _waitSource.Version).AsTask().GetAwaiter().GetResult();
             }
 
-            public ValueTask WaitForDataAsync(CancellationToken cancellationToken)
+            public ValueTask WaitAsync(CancellationToken cancellationToken)
             {
                 _waitSource.RunContinuationsAsynchronously = true;
 
