@@ -39,7 +39,10 @@ namespace System.Net.Http
         /// Whether code has requested or is about to request a wait be performed and thus requires a call to SetResult to complete it.
         /// This is read and written while holding the lock so that most operations on _waitSource don't need to be.
         /// </summary>
-        private bool _hasWaiter;
+        private int _hasWaiter;
+
+
+
         private bool _writeEnded;
         private bool _readAborted;
 
@@ -84,19 +87,16 @@ namespace System.Net.Http
             {
                 if (_readAborted)
                 {
-                    Debug.Assert(!_hasWaiter);
                     return;
                 }
 
                 _readAborted = true;
                 if (_buffer.ActiveLength != 0)
                 {
-                    Debug.Assert(!_hasWaiter);
                     _buffer.Discard(_buffer.ActiveLength);
                 }
 
-                signalWaiter = _hasWaiter;
-                _hasWaiter = false;
+                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
             }
 
             if (signalWaiter)
@@ -131,8 +131,7 @@ namespace System.Net.Http
                 buffer.CopyTo(_buffer.AvailableSpan);
                 _buffer.Commit(buffer.Length);
 
-                signalWaiter = _hasWaiter;
-                _hasWaiter = false;
+                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
             }
 
             if (signalWaiter)
@@ -150,14 +149,12 @@ namespace System.Net.Http
             {
                 if (_writeEnded)
                 {
-                    Debug.Assert(!_hasWaiter);
                     return;
                 }
 
                 _writeEnded = true;
 
-                signalWaiter = _hasWaiter;
-                _hasWaiter = false;
+                signalWaiter = Interlocked.Exchange(ref _hasWaiter, 0) == 1;
             }
 
             if (signalWaiter)
@@ -173,8 +170,6 @@ namespace System.Net.Http
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
             {
-                Debug.Assert(!_hasWaiter);
-
                 if (_readAborted)
                 {
                     return (false, 0);
@@ -193,8 +188,9 @@ namespace System.Net.Http
                     return (false, 0);
                 }
 
-                _hasWaiter = true;
                 _waitSource.Reset();
+                Debug.Assert(_hasWaiter == 0);
+                _hasWaiter = 1;
                 return (true, 0);
             }
         }
@@ -288,8 +284,7 @@ namespace System.Net.Http
                 Debug.Assert(!Monitor.IsEntered(thisRef.SyncObject));
                 lock (thisRef.SyncObject)
                 {
-                    signalWaiter = thisRef._hasWaiter;
-                    thisRef._hasWaiter = false;
+                    signalWaiter = Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1;
                 }
 
                 if (signalWaiter)
