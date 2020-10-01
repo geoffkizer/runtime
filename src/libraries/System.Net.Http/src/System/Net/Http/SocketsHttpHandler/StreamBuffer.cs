@@ -40,7 +40,7 @@ namespace System.Net.Http
             }
         }
 
-        public int BufferedByteCount
+        public int ReadBytesAvailable
         {
             get
             {

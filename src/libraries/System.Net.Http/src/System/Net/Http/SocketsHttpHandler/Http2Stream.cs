@@ -806,7 +806,7 @@ namespace System.Net.Http
                             break;
                     }
 
-                    if (_responseStreamBuffer.BufferedByteCount + buffer.Length > StreamWindowSize)
+                    if (_responseStreamBuffer.ReadBytesAvailable + buffer.Length > StreamWindowSize)
                     {
                         // Window size exceeded.
                         ThrowProtocolError(Http2ProtocolErrorCode.FlowControlError);
