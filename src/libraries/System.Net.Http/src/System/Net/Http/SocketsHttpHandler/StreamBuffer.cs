@@ -280,13 +280,7 @@ namespace System.Net.Http
             {
                 var thisRef = (StreamBuffer)s!;
 
-                bool signalWaiter;
-                Debug.Assert(!Monitor.IsEntered(thisRef.SyncObject));
-                lock (thisRef.SyncObject)
-                {
-                    signalWaiter = Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1;
-                }
-
+                bool signalWaiter = Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1;
                 if (signalWaiter)
                 {
                     // Wake up the wait.  It will then immediately check whether cancellation was requested and throw if it was.
