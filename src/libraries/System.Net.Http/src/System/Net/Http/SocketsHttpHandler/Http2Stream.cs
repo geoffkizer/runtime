@@ -957,14 +957,18 @@ namespace System.Net.Http
                     else
                     {
                         Debug.Assert(_responseProtocolState == ResponseProtocolState.Complete);
-                        return (false, _responseBuffer.ActiveLength == 0);
+
+                        // Don't need to check ActiveLength here anymore, callers ignore isEmptyResponse
+                        // TODO: Clean this up
+                        //return (false, _responseBuffer.ActiveLength == 0);
+                        return (false, false);
                     }
                 }
             }
 
             public async Task ReadResponseHeadersAsync(CancellationToken cancellationToken)
             {
-                bool emptyResponse;
+                //bool emptyResponse;
                 try
                 {
                     if (HttpTelemetry.Log.IsEnabled()) HttpTelemetry.Log.ResponseHeadersStart();
@@ -973,12 +977,12 @@ namespace System.Net.Http
                     bool wait;
 
                     // Process all informational responses if any and wait for final status.
-                    (wait, emptyResponse) = TryEnsureHeaders();
+                    (wait, _) = TryEnsureHeaders();
                     if (wait)
                     {
                         await WaitForDataAsync(cancellationToken).ConfigureAwait(false);
 
-                        (wait, emptyResponse) = TryEnsureHeaders();
+                        (wait, _) = TryEnsureHeaders();
                         Debug.Assert(!wait);
                     }
 
@@ -993,6 +997,7 @@ namespace System.Net.Http
                 Debug.Assert(_response != null && _response.Content != null);
                 // Start to process the response body.
                 var responseContent = (HttpConnectionResponseContent)_response.Content;
+                bool emptyResponse = IsResponseBodyComplete();
                 if (emptyResponse)
                 {
                     // If there are any trailers, copy them over to the response.  Normally this would be handled by
@@ -1127,6 +1132,15 @@ namespace System.Net.Http
                 return bytesRead;
             }
 
+            public bool IsResponseBodyComplete()
+            {
+                Debug.Assert(!Monitor.IsEntered(SyncObject));
+                lock (SyncObject)
+                {
+                    return (_responseBuffer.ActiveLength == 0 && _responseProtocolState == ResponseProtocolState.Complete);
+                }
+            }
+
             public void CopyTo(HttpResponseMessage responseMessage, Stream destination, int bufferSize)
             {
                 byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
@@ -1135,26 +1149,13 @@ namespace System.Net.Http
                     // Generally the same logic as in ReadData, but wrapped in a loop where every read segment is written to the destination.
                     while (true)
                     {
-                        (bool wait, int bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
-                        if (wait)
+                        int bytesRead = ReadData(buffer.AsSpan(), responseMessage);
+                        if (bytesRead == 0)
                         {
-                            Debug.Assert(bytesRead == 0);
-                            WaitForData();
-                            (wait, bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
-                            Debug.Assert(!wait);
+                            break;
                         }
 
-                        if (bytesRead != 0)
-                        {
-                            ExtendWindow(bytesRead);
-                            destination.Write(new ReadOnlySpan<byte>(buffer, 0, bytesRead));
-                        }
-                        else
-                        {
-                            // We've hit EOF.  Pull in from the Http2Stream any trailers that were temporarily stored there.
-                            MoveTrailersToResponseMessage(responseMessage);
-                            return;
-                        }
+                        destination.Write(new ReadOnlySpan<byte>(buffer, 0, bytesRead));
                     }
                 }
                 finally
@@ -1171,26 +1172,13 @@ namespace System.Net.Http
                     // Generally the same logic as in ReadDataAsync, but wrapped in a loop where every read segment is written to the destination.
                     while (true)
                     {
-                        (bool wait, int bytesRead) = TryReadFromBuffer(buffer);
-                        if (wait)
+                        int bytesRead = await ReadDataAsync(buffer.AsMemory(), responseMessage, cancellationToken).ConfigureAwait(false);
+                        if (bytesRead == 0)
                         {
-                            Debug.Assert(bytesRead == 0);
-                            await WaitForDataAsync(cancellationToken).ConfigureAwait(false);
-                            (wait, bytesRead) = TryReadFromBuffer(buffer);
-                            Debug.Assert(!wait);
+                            break;
                         }
 
-                        if (bytesRead != 0)
-                        {
-                            ExtendWindow(bytesRead);
-                            await destination.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, bytesRead), cancellationToken).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            // We've hit EOF.  Pull in from the Http2Stream any trailers that were temporarily stored there.
-                            MoveTrailersToResponseMessage(responseMessage);
-                            return;
-                        }
+                        await destination.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, bytesRead), cancellationToken).ConfigureAwait(false);
                     }
                 }
                 finally
@@ -1264,15 +1252,7 @@ namespace System.Net.Http
             private void CloseResponseBody()
             {
                 // Check if the response body has been fully consumed.
-                bool fullyConsumed = false;
-                Debug.Assert(!Monitor.IsEntered(SyncObject));
-                lock (SyncObject)
-                {
-                    if (_responseBuffer.ActiveLength == 0 && _responseProtocolState == ResponseProtocolState.Complete)
-                    {
-                        fullyConsumed = true;
-                    }
-                }
+                bool fullyConsumed = IsResponseBodyComplete();
 
                 // If the response body isn't completed, cancel it now.
                 if (!fullyConsumed)
