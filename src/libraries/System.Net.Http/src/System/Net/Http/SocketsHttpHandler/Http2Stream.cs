@@ -35,7 +35,8 @@ namespace System.Net.Http
             /// <summary>Stores any trailers received after returning the response content to the caller.</summary>
             private HttpResponseHeaders? _trailers;
 
-            private ArrayBuffer _responseBuffer; // mutable struct, do not make this readonly
+            //private ArrayBuffer _responseBuffer; // mutable struct, do not make this readonly
+            private readonly StreamBuffer _responseStreamBuffer;
             private int _pendingWindowUpdate;
             private CreditWaiter? _creditWaiter;
             private int _availableCredit;
@@ -99,7 +100,8 @@ namespace System.Net.Http
 
                 _responseProtocolState = ResponseProtocolState.ExpectingStatus;
 
-                _responseBuffer = new ArrayBuffer(InitialStreamBufferSize, usePool: true);
+                //_responseBuffer = new ArrayBuffer(InitialStreamBufferSize, usePool: true);
+                _responseStreamBuffer = new StreamBuffer(InitialStreamBufferSize);
 
                 _pendingWindowUpdate = 0;
                 _headerBudgetRemaining = connection._pool.Settings._maxResponseHeadersLength * 1024;
@@ -408,14 +410,13 @@ namespace System.Net.Http
                     }
                 }
 
-                // Discard any remaining buffered response data
-                if (_responseBuffer.ActiveLength != 0)
-                {
-                    _responseBuffer.Discard(_responseBuffer.ActiveLength);
-                }
-
                 _responseProtocolState = ResponseProtocolState.Aborted;
 
+                // Discard any remaining buffered response data
+                _responseStreamBuffer.AbortRead();
+
+                // TODO: I'm leaving this here for now because I think it may be necessary in cases where the response headers haven't completed yet.
+                // Investigate this further.
                 bool signalWaiter = _hasWaiter;
                 _hasWaiter = false;
 
@@ -772,6 +773,8 @@ namespace System.Net.Http
                         // We should never reach here with the request failed. It's only set to Failed in SendRequestBodyAsync after we've called Cancel,
                         // which will set the _responseCompletionState to Failed, meaning we'll never get here.
                         Debug.Assert(_requestCompletionState != StreamCompletionState.Failed);
+
+                        _responseStreamBuffer.CompleteWrite();
                     }
 
                     signalWaiter = _hasWaiter;
@@ -787,7 +790,6 @@ namespace System.Net.Http
             public void OnResponseData(ReadOnlySpan<byte> buffer, bool endStream)
             {
                 Debug.Assert(!Monitor.IsEntered(SyncObject));
-                bool signalWaiter;
                 lock (SyncObject)
                 {
                     switch (_responseProtocolState)
@@ -804,15 +806,13 @@ namespace System.Net.Http
                             break;
                     }
 
-                    if (_responseBuffer.ActiveLength + buffer.Length > StreamWindowSize)
+                    if (_responseStreamBuffer.BufferedByteCount + buffer.Length > StreamWindowSize)
                     {
                         // Window size exceeded.
                         ThrowProtocolError(Http2ProtocolErrorCode.FlowControlError);
                     }
 
-                    _responseBuffer.EnsureAvailableSpace(buffer.Length);
-                    buffer.CopyTo(_responseBuffer.AvailableSpan);
-                    _responseBuffer.Commit(buffer.Length);
+                    _responseStreamBuffer.Write(buffer);
 
                     if (endStream)
                     {
@@ -829,15 +829,9 @@ namespace System.Net.Http
                         // We should never reach here with the request failed. It's only set to Failed in SendRequestBodyAsync after we've called Cancel,
                         // which will set the _responseCompletionState to Failed, meaning we'll never get here.
                         Debug.Assert(_requestCompletionState != StreamCompletionState.Failed);
+
+                        _responseStreamBuffer.CompleteWrite();
                     }
-
-                    signalWaiter = _hasWaiter;
-                    _hasWaiter = false;
-                }
-
-                if (signalWaiter)
-                {
-                    _waitSource.SetResult(true);
                 }
             }
 
@@ -997,7 +991,7 @@ namespace System.Net.Http
                 Debug.Assert(_response != null && _response.Content != null);
                 // Start to process the response body.
                 var responseContent = (HttpConnectionResponseContent)_response.Content;
-                bool emptyResponse = IsResponseBodyComplete();
+                bool emptyResponse = StreamBufferIsComplete();
                 if (emptyResponse)
                 {
                     // If there are any trailers, copy them over to the response.  Normally this would be handled by
@@ -1041,61 +1035,23 @@ namespace System.Net.Http
                 _connection.LogExceptions(_connection.SendWindowUpdateAsync(StreamId, windowUpdateSize));
             }
 
-            private (bool wait, int bytesRead) TryReadFromBuffer(Span<byte> buffer, bool partOfSyncRead = false)
-            {
-                Debug.Assert(buffer.Length > 0);
-
-                Debug.Assert(!Monitor.IsEntered(SyncObject));
-                lock (SyncObject)
-                {
-                    CheckResponseBodyState();
-
-                    if (_responseBuffer.ActiveLength > 0)
-                    {
-                        int bytesRead = Math.Min(buffer.Length, _responseBuffer.ActiveLength);
-                        _responseBuffer.ActiveSpan.Slice(0, bytesRead).CopyTo(buffer);
-                        _responseBuffer.Discard(bytesRead);
-
-                        return (false, bytesRead);
-                    }
-                    else if (_responseProtocolState == ResponseProtocolState.Complete)
-                    {
-                        return (false, 0);
-                    }
-
-                    Debug.Assert(_responseProtocolState == ResponseProtocolState.ExpectingData || _responseProtocolState == ResponseProtocolState.ExpectingTrailingHeaders);
-
-                    Debug.Assert(!_hasWaiter);
-                    _hasWaiter = true;
-                    _waitSource.Reset();
-                    _waitSource.RunContinuationsAsynchronously = !partOfSyncRead;
-                    return (true, 0);
-                }
-            }
-
             public int ReadData(Span<byte> buffer, HttpResponseMessage responseMessage)
             {
-                if (buffer.Length == 0)
-                {
-                    return 0;
-                }
-
-                (bool wait, int bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
-                if (wait)
-                {
-                    // Synchronously block waiting for data to be produced.
-                    Debug.Assert(bytesRead == 0);
-                    WaitForData();
-                    (wait, bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
-                    Debug.Assert(!wait);
-                }
-
+                int bytesRead = _responseStreamBuffer.Read(buffer);
                 if (bytesRead != 0)
                 {
                     ExtendWindow(bytesRead);
                 }
                 else
                 {
+                    // We need to handle the case where we got 0 bytes because the response was failed or aborted
+                    // TODO: Figure out how to clean this up
+                    Debug.Assert(!Monitor.IsEntered(SyncObject));
+                    lock (SyncObject)
+                    {
+                        CheckResponseBodyState();
+                    }
+
                     // We've hit EOF.  Pull in from the Http2Stream any trailers that were temporarily stored there.
                     MoveTrailersToResponseMessage(responseMessage);
                 }
@@ -1105,26 +1061,21 @@ namespace System.Net.Http
 
             public async ValueTask<int> ReadDataAsync(Memory<byte> buffer, HttpResponseMessage responseMessage, CancellationToken cancellationToken)
             {
-                if (buffer.Length == 0)
-                {
-                    return 0;
-                }
-
-                (bool wait, int bytesRead) = TryReadFromBuffer(buffer.Span);
-                if (wait)
-                {
-                    Debug.Assert(bytesRead == 0);
-                    await WaitForDataAsync(cancellationToken).ConfigureAwait(false);
-                    (wait, bytesRead) = TryReadFromBuffer(buffer.Span);
-                    Debug.Assert(!wait);
-                }
-
+                int bytesRead = await _responseStreamBuffer.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (bytesRead != 0)
                 {
                     ExtendWindow(bytesRead);
                 }
                 else
                 {
+                    // We need to handle the case where we got 0 bytes because the response was failed or aborted
+                    // TODO: Figure out how to clean this up
+                    Debug.Assert(!Monitor.IsEntered(SyncObject));
+                    lock (SyncObject)
+                    {
+                        CheckResponseBodyState();
+                    }
+
                     // We've hit EOF.  Pull in from the Http2Stream any trailers that were temporarily stored there.
                     MoveTrailersToResponseMessage(responseMessage);
                 }
@@ -1132,13 +1083,9 @@ namespace System.Net.Http
                 return bytesRead;
             }
 
-            public bool IsResponseBodyComplete()
+            public bool StreamBufferIsComplete()
             {
-                Debug.Assert(!Monitor.IsEntered(SyncObject));
-                lock (SyncObject)
-                {
-                    return (_responseBuffer.ActiveLength == 0 && _responseProtocolState == ResponseProtocolState.Complete);
-                }
+                return _responseStreamBuffer.IsComplete;
             }
 
             public void CopyTo(HttpResponseMessage responseMessage, Stream destination, int bufferSize)
@@ -1252,7 +1199,7 @@ namespace System.Net.Http
             private void CloseResponseBody()
             {
                 // Check if the response body has been fully consumed.
-                bool fullyConsumed = IsResponseBodyComplete();
+                bool fullyConsumed = StreamBufferIsComplete();
 
                 // If the response body isn't completed, cancel it now.
                 if (!fullyConsumed)
@@ -1260,7 +1207,7 @@ namespace System.Net.Http
                     Cancel();
                 }
 
-                _responseBuffer.Dispose();
+                _responseStreamBuffer.Dispose();
             }
 
             private CancellationTokenRegistration RegisterRequestBodyCancellation(CancellationToken cancellationToken) =>
