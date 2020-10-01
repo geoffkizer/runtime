@@ -219,8 +219,6 @@ namespace System.Net.Http
         void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _waitSource.OnCompleted(continuation, state, token, flags);
         void IValueTaskSource.GetResult(short token)
         {
-            Debug.Assert(!Monitor.IsEntered(SyncObject));
-
             // Clean up the registration.  It's important to Dispose rather than Unregister, so that we wait
             // for any in-flight cancellation to complete.
             _waitSourceCancellation.Dispose();
@@ -258,7 +256,6 @@ namespace System.Net.Http
 
         private void WaitForData()
         {
-            // See comments in WaitAsync.
             _waitSource.RunContinuationsAsynchronously = false;
             new ValueTask(this, _waitSource.Version).AsTask().GetAwaiter().GetResult();
         }
@@ -267,24 +264,8 @@ namespace System.Net.Http
         {
             _waitSource.RunContinuationsAsynchronously = true;
 
-            // No locking is required here to access _waitSource.  To be here, we've already updated _hasWaiter (while holding the lock)
-            // to indicate that we would be creating this waiter, and at that point the only code that could be await'ing _waitSource or
-            // Reset'ing it is this code here.  It's possible for this to race with the _waitSource being completed, but that's ok and is
-            // handled by _waitSource as one of its primary purposes.  We can't assert _hasWaiter here, though, as once we released the
-            // lock, a producer could have seen _hasWaiter as true and both set it to false and signaled _waitSource.
-
             _waitSourceCancellationToken = cancellationToken;
-            _waitSourceCancellation = cancellationToken.UnsafeRegister(static s =>
-            {
-                var thisRef = (StreamBuffer)s!;
-
-                if (Interlocked.Exchange(ref thisRef._hasWaiter, 0) == 1)
-                {
-                    // Wake up the wait.  It will then immediately check whether cancellation was requested and throw if it was.
-                    thisRef._waitSource.SetException(ExceptionDispatchInfo.SetCurrentStackTrace(
-                        CancellationHelper.CreateOperationCanceledException(null, thisRef._waitSourceCancellationToken)));
-                }
-            }, this);
+            _waitSourceCancellation = cancellationToken.UnsafeRegister(static s => ((StreamBuffer)s!).CancelWaiter(), this);
 
             return new ValueTask(this, _waitSource.Version);
         }
