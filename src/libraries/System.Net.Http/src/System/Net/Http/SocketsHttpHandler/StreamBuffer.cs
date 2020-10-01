@@ -39,7 +39,7 @@ namespace System.Net.Http
         /// This is read and written while holding the lock so that most operations on _waitSource don't need to be.
         /// </summary>
         private bool _hasWaiter;
-        private bool _writeCompleted;
+        private bool _writeEnded;
         private bool _readAborted;
 
         public StreamBuffer(int initialSize = 4096)
@@ -57,7 +57,7 @@ namespace System.Net.Http
                 lock (SyncObject)
                 {
                     // CONSIDER: What should this do when _readAborted is true?
-                    return _writeCompleted && _buffer.ActiveLength == 0;
+                    return _writeEnded && _buffer.ActiveLength == 0;
                 }
             }
         }
@@ -116,7 +116,7 @@ namespace System.Net.Http
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
             {
-                if (_writeCompleted)
+                if (_writeEnded)
                 {
                     throw new InvalidOperationException();
                 }
@@ -140,20 +140,20 @@ namespace System.Net.Http
             }
         }
 
-        public void CompleteWrite()
+        public void EndWrite()
         {
             bool signalWaiter;
 
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
             {
-                if (_writeCompleted)
+                if (_writeEnded)
                 {
                     Debug.Assert(!_hasWaiter);
                     return;
                 }
 
-                _writeCompleted = true;
+                _writeEnded = true;
 
                 signalWaiter = _hasWaiter;
                 _hasWaiter = false;
@@ -187,7 +187,7 @@ namespace System.Net.Http
 
                     return (false, bytesRead);
                 }
-                else if (_writeCompleted)
+                else if (_writeEnded)
                 {
                     return (false, 0);
                 }
@@ -311,7 +311,7 @@ namespace System.Net.Http
         public void Dispose()
         {
             AbortRead();
-            CompleteWrite();
+            EndWrite();
 
             _buffer.Dispose();
         }

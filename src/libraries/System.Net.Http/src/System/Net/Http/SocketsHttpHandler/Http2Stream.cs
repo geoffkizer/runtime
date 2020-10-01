@@ -774,7 +774,7 @@ namespace System.Net.Http
                         // which will set the _responseCompletionState to Failed, meaning we'll never get here.
                         Debug.Assert(_requestCompletionState != StreamCompletionState.Failed);
 
-                        _responseStreamBuffer.CompleteWrite();
+                        _responseStreamBuffer.EndWrite();
                     }
 
                     signalWaiter = _hasWaiter;
@@ -830,7 +830,7 @@ namespace System.Net.Http
                         // which will set the _responseCompletionState to Failed, meaning we'll never get here.
                         Debug.Assert(_requestCompletionState != StreamCompletionState.Failed);
 
-                        _responseStreamBuffer.CompleteWrite();
+                        _responseStreamBuffer.EndWrite();
                     }
                 }
             }
