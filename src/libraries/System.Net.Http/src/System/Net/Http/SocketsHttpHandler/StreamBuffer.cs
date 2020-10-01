@@ -165,7 +165,7 @@ namespace System.Net.Http
             }
         }
 
-        private (bool wait, int bytesRead) TryReadFromBuffer(Span<byte> buffer, bool partOfSyncRead = false)
+        private (bool wait, int bytesRead) TryReadFromBuffer(Span<byte> buffer)
         {
             Debug.Assert(buffer.Length > 0);
 
@@ -194,7 +194,6 @@ namespace System.Net.Http
 
                 _hasWaiter = true;
                 _waitSource.Reset();
-                _waitSource.RunContinuationsAsynchronously = !partOfSyncRead;
                 return (true, 0);
             }
         }
@@ -206,13 +205,13 @@ namespace System.Net.Http
                 return 0;
             }
 
-            (bool wait, int bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
+            (bool wait, int bytesRead) = TryReadFromBuffer(buffer);
             if (wait)
             {
                 // Synchronously block waiting for data to be produced.
                 Debug.Assert(bytesRead == 0);
                 WaitForData();
-                (wait, bytesRead) = TryReadFromBuffer(buffer, partOfSyncRead: true);
+                (wait, bytesRead) = TryReadFromBuffer(buffer);
                 Debug.Assert(!wait);
             }
 
@@ -259,13 +258,13 @@ namespace System.Net.Http
         private void WaitForData()
         {
             // See comments in WaitAsync.
-            Debug.Assert(!_waitSource.RunContinuationsAsynchronously);
+            _waitSource.RunContinuationsAsynchronously = false;
             new ValueTask(this, _waitSource.Version).AsTask().GetAwaiter().GetResult();
         }
 
         private ValueTask WaitForDataAsync(CancellationToken cancellationToken)
         {
-            Debug.Assert(_waitSource.RunContinuationsAsynchronously);
+            _waitSource.RunContinuationsAsynchronously = true;
 
             // No locking is required here to access _waitSource.  To be here, we've already updated _hasWaiter (while holding the lock)
             // to indicate that we would be creating this waiter, and at that point the only code that could be await'ing _waitSource or
