@@ -10,45 +10,17 @@ using System.Threading.Tasks.Sources;
 namespace System.Net.Http
 {
     // Note this buffer is unbounded.
-    internal sealed class StreamBuffer : IValueTaskSource, IDisposable
+    internal sealed class StreamBuffer : IDisposable
     {
         private ArrayBuffer _buffer; // mutable struct, do not make this readonly
-
-        /// <summary>
-        /// The core logic for the IValueTaskSource implementation.
-        ///
-        /// Thread-safety:
-        /// _waitSource is used to coordinate between a producer indicating that something is available to process (either the connection's event loop
-        /// or a cancellation request) and a consumer doing that processing.  There must only ever be a single consumer, namely this stream reading
-        /// data associated with the response.  Because there is only ever at most one consumer, producers can trust that if _hasWaiter is true,
-        /// until the _waitSource is then set, no consumer will attempt to reset the _waitSource.  A producer must still take SyncObj in order to
-        /// coordinate with other producers (e.g. a race between data arriving from the event loop and cancellation being requested), but while holding
-        /// the lock it can check whether _hasWaiter is true, and if it is, set _hasWaiter to false, exit the lock, and then set the _waitSource. Another
-        /// producer coming along will then see _hasWaiter as false and will not attempt to concurrently set _waitSource (which would violate _waitSource's
-        /// thread-safety), and no other consumer could come along in the interim, because _hasWaiter being true means that a consumer is already waiting
-        /// for _waitSource to be set, and legally there can only be one consumer.  Once this producer sets _waitSource, the consumer could quickly loop
-        /// around to wait again, but invariants have all been maintained in the interim, and the consumer would need to take the SyncObj lock in order to
-        /// Reset _waitSource.
-        /// </summary>
-        private ManualResetValueTaskSourceCore<bool> _waitSource = new ManualResetValueTaskSourceCore<bool> { RunContinuationsAsynchronously = true }; // mutable struct, do not make this readonly
-        private CancellationToken _waitSourceCancellationToken;
-        /// <summary>Cancellation registration used to cancel the <see cref="_waitSource"/>.</summary>
-        private CancellationTokenRegistration _waitSourceCancellation;
-
-        /// <summary>
-        /// Whether code has requested or is about to request a wait be performed and thus requires a call to SetResult to complete it.
-        /// This is read and written while holding the lock so that most operations on _waitSource don't need to be.
-        /// </summary>
-        private int _hasWaiter;
-
-
-
         private bool _writeEnded;
         private bool _readAborted;
+        private readonly ResettableValueTaskSource _taskSource;
 
         public StreamBuffer(int initialSize = 4096)
         {
             _buffer = new ArrayBuffer(initialSize, usePool: true);
+            _taskSource = new ResettableValueTaskSource();
         }
 
         private object SyncObject => this; // this isn't handed out to code that may lock on it
@@ -94,7 +66,7 @@ namespace System.Net.Http
                     _buffer.Discard(_buffer.ActiveLength);
                 }
 
-                SignalWaiter();
+                _taskSource.SignalWaiter();
             }
         }
 
@@ -122,7 +94,7 @@ namespace System.Net.Http
                 buffer.CopyTo(_buffer.AvailableSpan);
                 _buffer.Commit(buffer.Length);
 
-                SignalWaiter();
+                _taskSource.SignalWaiter();
             }
         }
 
@@ -138,7 +110,7 @@ namespace System.Net.Http
 
                 _writeEnded = true;
 
-                SignalWaiter();
+                _taskSource.SignalWaiter();
             }
         }
 
@@ -167,7 +139,7 @@ namespace System.Net.Http
                     return (false, 0);
                 }
 
-                Reset();
+                _taskSource.Reset();
 
                 return (true, 0);
             }
@@ -185,7 +157,7 @@ namespace System.Net.Http
             {
                 // Synchronously block waiting for data to be produced.
                 Debug.Assert(bytesRead == 0);
-                WaitForData();
+                _taskSource.WaitForData();
                 (wait, bytesRead) = TryReadFromBuffer(buffer);
                 Debug.Assert(!wait);
             }
@@ -204,72 +176,12 @@ namespace System.Net.Http
             if (wait)
             {
                 Debug.Assert(bytesRead == 0);
-                await WaitForDataAsync(cancellationToken).ConfigureAwait(false);
+                await _taskSource.WaitForDataAsync(cancellationToken).ConfigureAwait(false);
                 (wait, bytesRead) = TryReadFromBuffer(buffer.Span);
                 Debug.Assert(!wait);
             }
 
             return bytesRead;
-        }
-
-        // This object is itself usable as a backing source for ValueTask.  Since there's only ever one awaiter
-        // for this object's state transitions at a time, we allow the object to be awaited directly. All functionality
-        // associated with the implementation is just delegated to the ManualResetValueTaskSourceCore.
-        ValueTaskSourceStatus IValueTaskSource.GetStatus(short token) => _waitSource.GetStatus(token);
-        void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _waitSource.OnCompleted(continuation, state, token, flags);
-        void IValueTaskSource.GetResult(short token)
-        {
-            Debug.Assert(_hasWaiter == 0);
-
-            // Clean up the registration.  It's important to Dispose rather than Unregister, so that we wait
-            // for any in-flight cancellation to complete.
-            _waitSourceCancellation.Dispose();
-            _waitSourceCancellation = default;
-            _waitSourceCancellationToken = default;
-
-            // Propagate any exceptions if there were any.
-            _waitSource.GetResult(token);
-        }
-
-        private void SignalWaiter()
-        {
-            if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
-            {
-                _waitSource.SetResult(true);
-            }
-        }
-
-        private void CancelWaiter()
-        {
-            if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
-            {
-                Debug.Assert(_waitSourceCancellationToken != default);
-                _waitSource.SetException(ExceptionDispatchInfo.SetCurrentStackTrace(new OperationCanceledException(_waitSourceCancellationToken)));
-            }
-        }
-
-        private void Reset()
-        {
-            Debug.Assert(_hasWaiter == 0);
-
-            _waitSource.Reset();
-            Volatile.Write(ref _hasWaiter, 1);
-        }
-
-        private void WaitForData()
-        {
-            _waitSource.RunContinuationsAsynchronously = false;
-            new ValueTask(this, _waitSource.Version).AsTask().GetAwaiter().GetResult();
-        }
-
-        private ValueTask WaitForDataAsync(CancellationToken cancellationToken)
-        {
-            _waitSource.RunContinuationsAsynchronously = true;
-
-            _waitSourceCancellationToken = cancellationToken;
-            _waitSourceCancellation = cancellationToken.UnsafeRegister(static s => ((StreamBuffer)s!).CancelWaiter(), this);
-
-            return new ValueTask(this, _waitSource.Version);
         }
 
         public void Dispose()
@@ -278,6 +190,74 @@ namespace System.Net.Http
             EndWrite();
 
             _buffer.Dispose();
+        }
+
+        private sealed class ResettableValueTaskSource : IValueTaskSource
+        {
+            private ManualResetValueTaskSourceCore<bool> _waitSource = new ManualResetValueTaskSourceCore<bool> { RunContinuationsAsynchronously = true }; // mutable struct, do not make this readonly
+            private CancellationToken _waitSourceCancellationToken;
+            private CancellationTokenRegistration _waitSourceCancellation;
+            private int _hasWaiter;
+
+            // This object is itself usable as a backing source for ValueTask.  Since there's only ever one awaiter
+            // for this object's state transitions at a time, we allow the object to be awaited directly. All functionality
+            // associated with the implementation is just delegated to the ManualResetValueTaskSourceCore.
+            ValueTaskSourceStatus IValueTaskSource.GetStatus(short token) => _waitSource.GetStatus(token);
+            void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _waitSource.OnCompleted(continuation, state, token, flags);
+            void IValueTaskSource.GetResult(short token)
+            {
+                Debug.Assert(_hasWaiter == 0);
+
+                // Clean up the registration.  It's important to Dispose rather than Unregister, so that we wait
+                // for any in-flight cancellation to complete.
+                _waitSourceCancellation.Dispose();
+                _waitSourceCancellation = default;
+                _waitSourceCancellationToken = default;
+
+                // Propagate any exceptions if there were any.
+                _waitSource.GetResult(token);
+            }
+
+            public void SignalWaiter()
+            {
+                if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
+                {
+                    _waitSource.SetResult(true);
+                }
+            }
+
+            private void CancelWaiter()
+            {
+                if (Interlocked.Exchange(ref _hasWaiter, 0) == 1)
+                {
+                    Debug.Assert(_waitSourceCancellationToken != default);
+                    _waitSource.SetException(ExceptionDispatchInfo.SetCurrentStackTrace(new OperationCanceledException(_waitSourceCancellationToken)));
+                }
+            }
+
+            public void Reset()
+            {
+                Debug.Assert(_hasWaiter == 0);
+
+                _waitSource.Reset();
+                Volatile.Write(ref _hasWaiter, 1);
+            }
+
+            public void WaitForData()
+            {
+                _waitSource.RunContinuationsAsynchronously = false;
+                new ValueTask(this, _waitSource.Version).AsTask().GetAwaiter().GetResult();
+            }
+
+            public ValueTask WaitForDataAsync(CancellationToken cancellationToken)
+            {
+                _waitSource.RunContinuationsAsynchronously = true;
+
+                _waitSourceCancellationToken = cancellationToken;
+                _waitSourceCancellation = cancellationToken.UnsafeRegister(static s => ((ResettableValueTaskSource)s!).CancelWaiter(), this);
+
+                return new ValueTask(this, _waitSource.Version);
+            }
         }
     }
 }
