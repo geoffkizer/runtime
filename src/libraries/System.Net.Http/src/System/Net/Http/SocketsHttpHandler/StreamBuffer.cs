@@ -10,12 +10,14 @@ using System.Threading.Tasks.Sources;
 namespace System.Net.Http
 {
     // Note this buffer is unbounded.
+    // TODO: Add a bounded version of this
     internal sealed class StreamBuffer : IDisposable
     {
         private ArrayBuffer _buffer; // mutable struct, do not make this readonly
         private bool _writeEnded;
         private bool _readAborted;
         private readonly ResettableValueTaskSource _taskSource;
+        private readonly object _syncObject = new object();
 
         public StreamBuffer(int initialSize = 4096)
         {
@@ -23,7 +25,7 @@ namespace System.Net.Http
             _taskSource = new ResettableValueTaskSource();
         }
 
-        private object SyncObject => this; // this isn't handed out to code that may lock on it
+        private object SyncObject => _syncObject;
 
         public bool IsComplete
         {
