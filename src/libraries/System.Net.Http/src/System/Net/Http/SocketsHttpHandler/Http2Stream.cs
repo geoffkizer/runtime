@@ -35,7 +35,6 @@ namespace System.Net.Http
             /// <summary>Stores any trailers received after returning the response content to the caller.</summary>
             private HttpResponseHeaders? _trailers;
 
-            //private ArrayBuffer _responseBuffer; // mutable struct, do not make this readonly
             private readonly StreamBuffer _responseStreamBuffer;
             private int _pendingWindowUpdate;
             private CreditWaiter? _creditWaiter;
@@ -78,6 +77,8 @@ namespace System.Net.Http
             /// This is read and written while holding the lock so that most operations on _waitSource don't need to be.
             /// </summary>
             private bool _hasWaiter;
+            // !!! NOTE: _waitSource, _waitSourceCancellation, and _hasWaiter still exist because they are used for signalling the end of response body headers.
+            // This could be replaced with a simpler mechanism now (e.g. TaskCompletionSource or whatever), since it only occurs once per stream.
 
             private readonly CancellationTokenSource? _requestBodyCancellationSource;
 
@@ -100,8 +101,7 @@ namespace System.Net.Http
 
                 _responseProtocolState = ResponseProtocolState.ExpectingStatus;
 
-                //_responseBuffer = new ArrayBuffer(InitialStreamBufferSize, usePool: true);
-                _responseStreamBuffer = new StreamBuffer(InitialStreamBufferSize);
+                _responseStreamBuffer = new StreamBuffer(InitialStreamBufferSize, StreamWindowSize);
 
                 _pendingWindowUpdate = 0;
                 _headerBudgetRemaining = connection._pool.Settings._maxResponseHeadersLength * 1024;
@@ -812,6 +812,8 @@ namespace System.Net.Http
                         ThrowProtocolError(Http2ProtocolErrorCode.FlowControlError);
                     }
 
+                    // This Write call should never block because there should always be buffer space available for the write.
+                    Debug.Assert(_responseStreamBuffer.WriteBytesAvailable >= buffer.Length);
                     _responseStreamBuffer.Write(buffer);
 
                     if (endStream)

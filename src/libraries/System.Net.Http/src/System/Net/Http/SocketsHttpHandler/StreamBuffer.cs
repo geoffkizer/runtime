@@ -10,18 +10,23 @@ using System.Threading.Tasks.Sources;
 namespace System.Net.Http
 {
     // Note this buffer is unbounded.
-    // TODO: Add a bounded version of this
+    // TODO: Make bounded
     internal sealed class StreamBuffer : IDisposable
     {
         private ArrayBuffer _buffer; // mutable struct, do not make this readonly
+        private readonly int _maxSize;
         private bool _writeEnded;
         private bool _readAborted;
         private readonly ResettableValueTaskSource _taskSource;
         private readonly object _syncObject = new object();
 
-        public StreamBuffer(int initialSize = 4096)
+        public const int DefaultInitialBufferSize = 4 * 1024;
+        public const int DefaultMaxBufferSize = 32 * 1024;
+
+        public StreamBuffer(int initialSize = DefaultInitialBufferSize, int maxSize = DefaultMaxBufferSize)
         {
             _buffer = new ArrayBuffer(initialSize, usePool: true);
+            _maxSize = maxSize;
             _taskSource = new ResettableValueTaskSource();
         }
 
@@ -51,6 +56,8 @@ namespace System.Net.Http
                 }
             }
         }
+
+        public int WriteBytesAvailable => (_maxSize - ReadBytesAvailable);
 
         public void AbortRead()
         {
