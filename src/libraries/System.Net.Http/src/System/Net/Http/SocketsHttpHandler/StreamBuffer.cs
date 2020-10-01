@@ -219,6 +219,8 @@ namespace System.Net.Http
         void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _waitSource.OnCompleted(continuation, state, token, flags);
         void IValueTaskSource.GetResult(short token)
         {
+            Debug.Assert(_hasWaiter == 0);
+
             // Clean up the registration.  It's important to Dispose rather than Unregister, so that we wait
             // for any in-flight cancellation to complete.
             _waitSourceCancellation.Dispose();
