@@ -63,12 +63,32 @@ namespace System.Net.Http
                 Debug.Assert(!Monitor.IsEntered(SyncObject));
                 lock (SyncObject)
                 {
+                    if (_readAborted)
+                    {
+                        return 0;
+                    }
+
                     return _buffer.ActiveLength;
                 }
             }
         }
 
-        public int WriteBytesAvailable => (_maxSize - ReadBytesAvailable);
+        public int WriteBytesAvailable
+        {
+            get
+            {
+                Debug.Assert(!Monitor.IsEntered(SyncObject));
+                lock (SyncObject)
+                {
+                    if (_writeEnded)
+                    {
+                        throw new InvalidOperationException();
+                    }
+
+                    return _buffer.ActiveLength;
+                }
+            }
+        }
 
         private (bool wait, int bytesWritten) TryWriteToBuffer(ReadOnlySpan<byte> buffer)
         {
