@@ -9,8 +9,6 @@ using System.Threading.Tasks.Sources;
 
 namespace System.Net.Http
 {
-    // Note this buffer is unbounded.
-    // TODO: Make bounded
     internal sealed class StreamBuffer : IDisposable
     {
         private ArrayBuffer _buffer; // mutable struct, do not make this readonly
@@ -188,6 +186,8 @@ namespace System.Net.Http
                     _buffer.ActiveSpan.Slice(0, bytesRead).CopyTo(buffer);
                     _buffer.Discard(bytesRead);
 
+                    _writeTaskSource.SignalWaiter();
+
                     return (false, bytesRead);
                 }
                 else if (_writeEnded)
@@ -258,6 +258,7 @@ namespace System.Net.Http
                 }
 
                 _readTaskSource.SignalWaiter();
+                _writeTaskSource.SignalWaiter();
             }
         }
 
