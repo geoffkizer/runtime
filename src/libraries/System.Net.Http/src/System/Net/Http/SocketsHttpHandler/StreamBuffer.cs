@@ -119,7 +119,18 @@ namespace System.Net.Http
                 return;
             }
 
-            TryWriteToBuffer(buffer);
+            while (true)
+            {
+                (bool wait, int bytesWritten) = TryWriteToBuffer(buffer);
+                if (!wait)
+                {
+                    Debug.Assert(bytesWritten == buffer.Length);
+                    break;
+                }
+
+                buffer = buffer.Slice(bytesWritten);
+                _writeTaskSource.Wait();
+            }
         }
 
         public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
@@ -129,10 +140,18 @@ namespace System.Net.Http
                 return;
             }
 
-            TryWriteToBuffer(buffer.Span);
+            while (true)
+            {
+                (bool wait, int bytesWritten) = TryWriteToBuffer(buffer.Span);
+                if (!wait)
+                {
+                    Debug.Assert(bytesWritten == buffer.Length);
+                    break;
+                }
 
-            // Lame
-            await Task.Delay(0, cancellationToken).ConfigureAwait(false);
+                buffer = buffer.Slice(bytesWritten);
+                await _writeTaskSource.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         public void EndWrite()
@@ -192,7 +211,6 @@ namespace System.Net.Http
             (bool wait, int bytesRead) = TryReadFromBuffer(buffer);
             if (wait)
             {
-                // Synchronously block waiting for data to be produced.
                 Debug.Assert(bytesRead == 0);
                 _readTaskSource.Wait();
                 (wait, bytesRead) = TryReadFromBuffer(buffer);
