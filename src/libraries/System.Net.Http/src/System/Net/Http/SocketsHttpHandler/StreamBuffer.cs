@@ -292,22 +292,26 @@ namespace System.Net.Http
 
         private sealed class ResettableValueTaskSource : IValueTaskSource
         {
+            // This object is used as the backing source for ValueTask.
+            // There should only ever be one awaiter at a time; users of this object must ensure this themselves.
+            // We use _hasWaiter to ensure mutual exclusion between successful completion and cancellation,
+            // and dispose/clear the cancellation registration in GetResult to guarantee it will not affect subsequent waiters.
+            // The rest of the logic is deferred to ManualResetValueTaskSourceCore.
+
             private ManualResetValueTaskSourceCore<bool> _waitSource = new ManualResetValueTaskSourceCore<bool> { RunContinuationsAsynchronously = true }; // mutable struct, do not make this readonly
             private CancellationToken _waitSourceCancellationToken;
             private CancellationTokenRegistration _waitSourceCancellation;
             private int _hasWaiter;
 
-            // This object is itself usable as a backing source for ValueTask.  Since there's only ever one awaiter
-            // for this object's state transitions at a time, we allow the object to be awaited directly. All functionality
-            // associated with the implementation is just delegated to the ManualResetValueTaskSourceCore.
             ValueTaskSourceStatus IValueTaskSource.GetStatus(short token) => _waitSource.GetStatus(token);
+
             void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _waitSource.OnCompleted(continuation, state, token, flags);
+
             void IValueTaskSource.GetResult(short token)
             {
                 Debug.Assert(_hasWaiter == 0);
 
-                // Clean up the registration.  It's important to Dispose rather than Unregister, so that we wait
-                // for any in-flight cancellation to complete.
+                // Clean up the registration.  This will wait for any in-flight cancellation to complete.
                 _waitSourceCancellation.Dispose();
                 _waitSourceCancellation = default;
                 _waitSourceCancellationToken = default;
