@@ -18,6 +18,7 @@ namespace System.Net.Http
         private bool _writeEnded;
         private bool _readAborted;
         private readonly ResettableValueTaskSource _readTaskSource;
+        private readonly ResettableValueTaskSource _writeTaskSource;
         private readonly object _syncObject = new object();
 
         public const int DefaultInitialBufferSize = 4 * 1024;
@@ -28,6 +29,7 @@ namespace System.Net.Http
             _buffer = new ArrayBuffer(initialSize, usePool: true);
             _maxSize = maxSize;
             _readTaskSource = new ResettableValueTaskSource();
+            _writeTaskSource = new ResettableValueTaskSource();
         }
 
         private object SyncObject => _syncObject;
@@ -87,14 +89,26 @@ namespace System.Net.Http
                     return (false, buffer.Length);
                 }
 
-                // TODO: Fix
-                _buffer.EnsureAvailableSpace(buffer.Length);
-                buffer.CopyTo(_buffer.AvailableSpan);
-                _buffer.Commit(buffer.Length);
+                _buffer.TryEnsureAvailableSpaceUpToLimit(buffer.Length, _maxSize);
 
-                _readTaskSource.SignalWaiter();
+                int bytesWritten = Math.Min(buffer.Length, _buffer.AvailableLength);
+                if (bytesWritten > 0)
+                {
+                    buffer.Slice(0, bytesWritten).CopyTo(_buffer.AvailableSpan);
+                    _buffer.Commit(bytesWritten);
 
-                return (false, buffer.Length);
+                    _readTaskSource.SignalWaiter();
+                }
+
+                buffer = buffer.Slice(bytesWritten);
+                if (buffer.Length == 0)
+                {
+                    return (false, bytesWritten);
+                }
+
+                _writeTaskSource.Reset();
+
+                return (true, bytesWritten);
             }
         }
 
