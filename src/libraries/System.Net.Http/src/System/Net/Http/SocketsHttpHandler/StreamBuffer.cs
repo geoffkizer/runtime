@@ -85,7 +85,7 @@ namespace System.Net.Http
                         throw new InvalidOperationException();
                     }
 
-                    return _buffer.ActiveLength;
+                    return _maxSize - _buffer.ActiveLength;
                 }
             }
         }
