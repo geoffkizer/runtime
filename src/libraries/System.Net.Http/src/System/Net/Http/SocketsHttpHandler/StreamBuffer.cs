@@ -17,7 +17,7 @@ namespace System.Net.Http
         private readonly int _maxSize;
         private bool _writeEnded;
         private bool _readAborted;
-        private readonly ResettableValueTaskSource _taskSource;
+        private readonly ResettableValueTaskSource _readTaskSource;
         private readonly object _syncObject = new object();
 
         public const int DefaultInitialBufferSize = 4 * 1024;
@@ -27,7 +27,7 @@ namespace System.Net.Http
         {
             _buffer = new ArrayBuffer(initialSize, usePool: true);
             _maxSize = maxSize;
-            _taskSource = new ResettableValueTaskSource();
+            _readTaskSource = new ResettableValueTaskSource();
         }
 
         private object SyncObject => _syncObject;
@@ -39,8 +39,19 @@ namespace System.Net.Http
                 Debug.Assert(!Monitor.IsEntered(SyncObject));
                 lock (SyncObject)
                 {
-                    // CONSIDER: What should this do when _readAborted is true?
-                    return _writeEnded && _buffer.ActiveLength == 0;
+                    return (_writeEnded && _buffer.ActiveLength == 0);
+                }
+            }
+        }
+
+        public bool IsAborted
+        {
+            get
+            {
+                Debug.Assert(!Monitor.IsEntered(SyncObject));
+                lock (SyncObject)
+                {
+                    return _readAborted;
                 }
             }
         }
@@ -59,32 +70,9 @@ namespace System.Net.Http
 
         public int WriteBytesAvailable => (_maxSize - ReadBytesAvailable);
 
-        public void AbortRead()
+        private (bool wait, int bytesWritten) TryWriteToBuffer(ReadOnlySpan<byte> buffer)
         {
-            Debug.Assert(!Monitor.IsEntered(SyncObject));
-            lock (SyncObject)
-            {
-                if (_readAborted)
-                {
-                    return;
-                }
-
-                _readAborted = true;
-                if (_buffer.ActiveLength != 0)
-                {
-                    _buffer.Discard(_buffer.ActiveLength);
-                }
-
-                _taskSource.SignalWaiter();
-            }
-        }
-
-        public void Write(ReadOnlySpan<byte> buffer)
-        {
-            if (buffer.Length == 0)
-            {
-                return;
-            }
+            Debug.Assert(buffer.Length > 0);
 
             Debug.Assert(!Monitor.IsEntered(SyncObject));
             lock (SyncObject)
@@ -96,15 +84,41 @@ namespace System.Net.Http
 
                 if (_readAborted)
                 {
-                    return;
+                    return (false, buffer.Length);
                 }
 
+                // TODO: Fix
                 _buffer.EnsureAvailableSpace(buffer.Length);
                 buffer.CopyTo(_buffer.AvailableSpan);
                 _buffer.Commit(buffer.Length);
 
-                _taskSource.SignalWaiter();
+                _readTaskSource.SignalWaiter();
+
+                return (false, buffer.Length);
             }
+        }
+
+        public void Write(ReadOnlySpan<byte> buffer)
+        {
+            if (buffer.Length == 0)
+            {
+                return;
+            }
+
+            TryWriteToBuffer(buffer);
+        }
+
+        public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (buffer.Length == 0)
+            {
+                return;
+            }
+
+            TryWriteToBuffer(buffer.Span);
+
+            // Lame
+            await Task.Delay(0, cancellationToken).ConfigureAwait(false);
         }
 
         public void EndWrite()
@@ -119,7 +133,7 @@ namespace System.Net.Http
 
                 _writeEnded = true;
 
-                _taskSource.SignalWaiter();
+                _readTaskSource.SignalWaiter();
             }
         }
 
@@ -148,7 +162,7 @@ namespace System.Net.Http
                     return (false, 0);
                 }
 
-                _taskSource.Reset();
+                _readTaskSource.Reset();
 
                 return (true, 0);
             }
@@ -166,7 +180,7 @@ namespace System.Net.Http
             {
                 // Synchronously block waiting for data to be produced.
                 Debug.Assert(bytesRead == 0);
-                _taskSource.Wait();
+                _readTaskSource.Wait();
                 (wait, bytesRead) = TryReadFromBuffer(buffer);
                 Debug.Assert(!wait);
             }
@@ -174,7 +188,7 @@ namespace System.Net.Http
             return bytesRead;
         }
 
-        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             if (buffer.Length == 0)
             {
@@ -185,12 +199,34 @@ namespace System.Net.Http
             if (wait)
             {
                 Debug.Assert(bytesRead == 0);
-                await _taskSource.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _readTaskSource.WaitAsync(cancellationToken).ConfigureAwait(false);
                 (wait, bytesRead) = TryReadFromBuffer(buffer.Span);
                 Debug.Assert(!wait);
             }
 
             return bytesRead;
+        }
+
+        // Note, this can be called while a read is in progress, and will cause it to return 0 bytes.
+        // Caller can then check IsAborted if appropriate to distinguish between EOF and abort.
+        public void AbortRead()
+        {
+            Debug.Assert(!Monitor.IsEntered(SyncObject));
+            lock (SyncObject)
+            {
+                if (_readAborted)
+                {
+                    return;
+                }
+
+                _readAborted = true;
+                if (_buffer.ActiveLength != 0)
+                {
+                    _buffer.Discard(_buffer.ActiveLength);
+                }
+
+                _readTaskSource.SignalWaiter();
+            }
         }
 
         public void Dispose()
