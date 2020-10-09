@@ -70,7 +70,13 @@ namespace System.Net.Sockets.Tests
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[{name}]: Caught exception: {e}");
+                    SocketError? socketError = null;
+                    if (e is SocketException se)
+                    {
+                        socketError = se.SocketErrorCode;
+                    }
+
+                    Console.WriteLine($"[{name}]: Caught exception, SocketErrorCode={socketError}: {e}");
                 }
             });
         }
@@ -88,7 +94,13 @@ namespace System.Net.Sockets.Tests
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[{name}]: Caught exception: {e}");
+                    SocketError? socketError = null;
+                    if (e is SocketException se)
+                    {
+                        socketError = se.SocketErrorCode;
+                    }
+
+                    Console.WriteLine($"[{name}]: Caught exception, SocketErrorCode={socketError}: {e}");
                 }
             });
         }
