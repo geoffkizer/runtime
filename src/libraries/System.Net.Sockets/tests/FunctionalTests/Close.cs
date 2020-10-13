@@ -203,6 +203,66 @@ namespace System.Net.Sockets.Tests
             await t2;
         }
 
+        [Fact]
+        public async Task ShutdownLinger0WithPendingSyncOperations()
+        {
+            const string name = "SyncShutdownLinger0";
+
+            (Socket client, Socket server) = GetConnectedTcpSockets();
+
+            Console.WriteLine($"[{name}]: Starting up");
+
+            Task t1 = DoReceive(name + " Client:", client);
+            Task t2 = DoReceive(name + " Server:", server);
+
+            Thread.Sleep(2000);
+
+            client.LingerState = new LingerOption(true, 0);
+
+            Console.WriteLine($"[{name}]: About to Shutdown");
+            client.Shutdown(SocketShutdown.Both);
+
+            Task t3 = DoReceive(name + " ClientAfterShutdown", client);
+
+            Thread.Sleep(2000);
+
+            Console.WriteLine($"[{name}]: About to Close");
+            client.Close();
+
+            await t1;
+            await t2;
+        }
+
+        [Fact]
+        public async Task ShutdownLinger0WithPendingAsyncOperations()
+        {
+            const string name = "AsyncShutdownLinger0";
+
+            (Socket client, Socket server) = GetConnectedTcpSockets();
+
+            Console.WriteLine($"[{name}]: Starting up");
+
+            Task t1 = DoReceiveAsync(name + " Client:", client);
+            Task t2 = DoReceiveAsync(name + " Server:", server);
+
+            Thread.Sleep(2000);
+
+            client.LingerState = new LingerOption(true, 0);
+
+            Console.WriteLine($"[{name}]: About to Shutdown");
+            client.Shutdown(SocketShutdown.Both);
+
+            Task t3 = DoReceiveAsync(name + " ClientAfterShutdown", client);
+
+            Thread.Sleep(2000);
+
+            Console.WriteLine($"[{name}]: About to Close");
+            client.Close();
+
+            await t1;
+            await t2;
+        }
+
         [System.Runtime.InteropServices.DllImport("kernel32", SetLastError = true)]
         private static extern unsafe bool CancelIoEx(IntPtr handle, NativeOverlapped* lpOverlapped);
 
