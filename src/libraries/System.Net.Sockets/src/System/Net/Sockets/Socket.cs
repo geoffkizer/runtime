@@ -4468,10 +4468,13 @@ namespace System.Net.Sockets
             GC.SuppressFinalize(this);
         }
 
+#if false
         ~Socket()
         {
-            Dispose(false);
+            Debug.Assert(true);
+            //Dispose(false);
         }
+#endif
 
         // This version does not throw.
         internal void InternalShutdown(SocketShutdown how)
@@ -5198,6 +5201,6 @@ namespace System.Net.Sockets
             }
         }
 
-        #endregion
+#endregion
     }
 }
