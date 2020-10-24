@@ -83,10 +83,7 @@ namespace System.Net.Quic.Implementations.Managed.Internal
                 Socket.Connect(remoteEndPoint);
             }
 
-            // TODO-RZ: Find out why I can't use RuntimeInformation when building inside .NET Runtime
-#if FEATURE_QUIC_STANDALONE
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-#endif
             {
                 // disable exception when client forcibly closes the socket.
                 // https://stackoverflow.com/questions/38191968/c-sharp-udp-an-existing-connection-was-forcibly-closed-by-the-remote-host
