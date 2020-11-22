@@ -382,6 +382,12 @@ namespace System.Security.Cryptography
 
                         bytesToDeliver -= numOutputBytes;
                         currentOutputIndex += numOutputBytes;
+
+                        // test
+                        CryptographicOperations.ZeroMemory(new Span<byte>(tempInputBuffer, 0, numWholeBlocksInBytes));
+                        ArrayPool<byte>.Shared.Return(tempInputBuffer);
+                        Debug.Assert(currentOutputIndex > offset);
+                        return currentOutputIndex - offset;
                     }
 
                     CryptographicOperations.ZeroMemory(new Span<byte>(tempInputBuffer, 0, numWholeBlocksInBytes));
