@@ -1492,34 +1492,44 @@ namespace System.Net.Sockets
             return ReceiveFromAsync(buffer, flags, null, ref socketAddressLen, out bytesReceived, out receivedFlags, callback, cancellationToken);
         }
 
-        public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
+        private (SocketError socketError, TResult result) DoSyncReceiveOperation<TState, TResult>(
+            int timeout,
+            TState state,
+            Func<SafeSocketHandle, TState, (bool, SocketError, TResult)> operation)
         {
             Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
-            SocketFlags receivedFlags;
-            SocketError errorCode;
             int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+            if (_receiveQueue.IsReady(this, out observedSequenceNumber))
             {
-                flags = receivedFlags;
-                return errorCode;
+                (bool completed, SocketError socketError, TResult result) = operation(_socket, state);
+                if (completed)
+                {
+                    return (socketError, result);
+                }
+
+                if (!ShouldRetrySyncOperation(out socketError))
+                {
+                    return (socketError, default!);
+                }
             }
 
-            var operation = new BufferMemoryReceiveOperation(this)
-            {
-                Buffer = buffer,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-            };
+            var op = new GenericOperation<TState, TResult>(this, state, operation, null!);
 
-            PerformSyncOperation(ref _receiveQueue, operation, timeout, observedSequenceNumber);
+            PerformSyncOperation(ref _receiveQueue, op, timeout, observedSequenceNumber);
 
-            flags = operation.ReceivedFlags;
-            bytesReceived = operation.BytesTransferred;
-            return operation.ErrorCode;
+            return (op.ErrorCode, op.Result);
+        }
+
+        public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
+        {
+            SocketError socketError;
+            (socketError, (bytesReceived, socketAddressLen, flags)) = DoSyncReceiveOperation(
+                timeout,
+                (buffer: buffer, flags: flags, socketAddress: socketAddress, socketAddressLen: socketAddressLen),
+                static (socket, state) => TryReceiveFrom(socket, state.buffer, state.socketAddress, state.socketAddressLen, state.flags));
+
+            return socketError;
         }
 
         public unsafe SocketError ReceiveFrom(Span<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
@@ -1647,7 +1657,7 @@ namespace System.Net.Sockets
         }
 
         // This is just SocketPal.TryCompleteReceive without out params
-        private static (bool completed, SocketError socketError, int bytesReceived) TryReceiveAsync(SafeSocketHandle socket, Memory<byte> buffer, SocketFlags flags)
+        private static (bool completed, SocketError socketError, int bytesReceived) TryReceive(SafeSocketHandle socket, Memory<byte> buffer, SocketFlags flags)
         {
             int bytesReceived;
             SocketError socketError;
@@ -1660,7 +1670,7 @@ namespace System.Net.Sockets
             SocketError socketError;
             (socketError, bytesReceived) = DoAsyncReceiveOperation(
                 (buffer: buffer, flags: flags, callback: callback),
-                static (socket, state) => TryReceiveAsync(socket, state.buffer, state.flags),
+                static (socket, state) => TryReceive(socket, state.buffer, state.flags),
                 static (state, socketError, bytesReceived) => state.callback(bytesReceived, null, 0, SocketFlags.None, socketError),
                 cancellationToken);
 
@@ -1668,7 +1678,7 @@ namespace System.Net.Sockets
         }
 
         // This is just SocketPal.TryCompleteReceiveFrom without out params
-        private static (bool completed, SocketError socketError, (int bytesReceived, int socketAddressLen, SocketFlags receivedFlags)) TryReceiveFromAsync(SafeSocketHandle socket, Memory<byte> buffer, byte[]? socketAddress, int socketAddressLen, SocketFlags flags)
+        private static (bool completed, SocketError socketError, (int bytesReceived, int socketAddressLen, SocketFlags receivedFlags)) TryReceiveFrom(SafeSocketHandle socket, Memory<byte> buffer, byte[]? socketAddress, int socketAddressLen, SocketFlags flags)
         {
             int bytesReceived;
             SocketError socketError;
@@ -1682,7 +1692,7 @@ namespace System.Net.Sockets
             SocketError socketError;
             (socketError, (bytesReceived, socketAddressLen, receivedFlags)) = DoAsyncReceiveOperation(
                 (buffer: buffer, flags: flags, socketAddress: socketAddress, socketAddressLen: socketAddressLen, callback: callback),
-                static (socket, state) => TryReceiveFromAsync(socket, state.buffer, state.socketAddress, state.socketAddressLen, state.flags),
+                static (socket, state) => TryReceiveFrom(socket, state.buffer, state.socketAddress, state.socketAddressLen, state.flags),
                 static (state, socketError, result) => state.callback(result.bytesReceived, state.socketAddress, result.socketAddressLen, result.receivedFlags, socketError),
                 cancellationToken);
 
