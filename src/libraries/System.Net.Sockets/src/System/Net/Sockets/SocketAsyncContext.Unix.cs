@@ -1667,39 +1667,26 @@ namespace System.Net.Sockets
             return socketError;
         }
 
+        // This is just SocketPal.TryCompleteReceiveFrom without out params
+        private static (bool completed, SocketError socketError, (int bytesReceived, int socketAddressLen, SocketFlags receivedFlags)) TryReceiveFromAsync(SafeSocketHandle socket, Memory<byte> buffer, byte[]? socketAddress, int socketAddressLen, SocketFlags flags)
+        {
+            int bytesReceived;
+            SocketError socketError;
+            SocketFlags receivedFlags;
+            bool completed = SocketPal.TryCompleteReceiveFrom(socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out socketError);
+            return (completed, socketError, (bytesReceived, socketAddressLen, receivedFlags));
+        }
+
         public SocketError ReceiveFromAsync(Memory<byte> buffer, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesReceived, out SocketFlags receivedFlags, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
         {
-            SetNonBlocking();
+            SocketError socketError;
+            (socketError, (bytesReceived, socketAddressLen, receivedFlags)) = DoAsyncReceiveOperation(
+                (buffer: buffer, flags: flags, socketAddress: socketAddress, socketAddressLen: socketAddressLen, callback: callback),
+                static (socket, state) => TryReceiveFromAsync(socket, state.buffer, state.socketAddress, state.socketAddressLen, state.flags),
+                static (state, socketError, result) => state.callback(result.bytesReceived, state.socketAddress, result.socketAddressLen, result.receivedFlags, socketError),
+                cancellationToken);
 
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
-            {
-                return errorCode;
-            }
-
-            BufferMemoryReceiveOperation operation = RentBufferMemoryReceiveOperation();
-            operation.SetReceivedFlags = true;
-            operation.Callback = callback;
-            operation.Buffer = buffer;
-            operation.Flags = flags;
-            operation.SocketAddress = socketAddress;
-            operation.SocketAddressLen = socketAddressLen;
-
-            if (!_receiveQueue.StartAsyncOperation(this, operation, observedSequenceNumber, cancellationToken))
-            {
-                receivedFlags = operation.ReceivedFlags;
-                bytesReceived = operation.BytesTransferred;
-                errorCode = operation.ErrorCode;
-
-                ReturnOperation(operation);
-                return errorCode;
-            }
-
-            bytesReceived = 0;
-            receivedFlags = SocketFlags.None;
-            return SocketError.IOPending;
+            return socketError;
         }
 
         public SocketError Receive(IList<ArraySegment<byte>> buffers, SocketFlags flags, int timeout, out int bytesReceived)
