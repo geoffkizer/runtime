@@ -1650,7 +1650,7 @@ namespace System.Net.Sockets
             return (completed, (bytesReceived, socketError));
         }
 
-        // TODO: 
+        // TODO:
         // Gotta wonder whether DoAsyncReceiveOperation should just return a SocketError, instead of returning completed and a SocketError.
 
         public SocketError ReceiveAsync(Memory<byte> buffer, SocketFlags flags, out int bytesReceived, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
