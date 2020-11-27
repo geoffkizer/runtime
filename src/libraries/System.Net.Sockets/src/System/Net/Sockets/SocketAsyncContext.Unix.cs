@@ -1558,14 +1558,14 @@ namespace System.Net.Sockets
         private sealed class GenericOperation<TState, TResult> : ReceiveOperation
         {
             private readonly TState _state;
-            private readonly Func<SafeSocketHandle, TState, (bool completed, TResult result)> _operation;
-            private readonly Action<TState, TResult> _callback;
+            private readonly Func<SafeSocketHandle, TState, (bool completed, SocketError socketError, TResult result)> _operation;
+            private readonly Action<TState, SocketError, TResult> _callback;
             private TResult _result;
 
             public GenericOperation(SocketAsyncContext context,
                 TState state,
-                Func<SafeSocketHandle, TState, (bool completed, TResult result)> operation,
-                Action<TState, TResult> callback)
+                Func<SafeSocketHandle, TState, (bool completed, SocketError socketError, TResult result)> operation,
+                Action<TState, SocketError, TResult> callback)
                 : base(context)
             {
                 _state = state;
@@ -1589,9 +1589,10 @@ namespace System.Net.Sockets
                 }
 #endif
 
-                (bool completed, TResult result) = _operation(context._socket, _state);
+                (bool completed, SocketError socketError, TResult result) = _operation(context._socket, _state);
                 if (completed)
                 {
+                    ErrorCode = socketError;
                     _result = result;
                     return true;
                 }
@@ -1610,23 +1611,27 @@ namespace System.Net.Sockets
                 }
 #endif
 
-                _callback(_state, _result);
+                _callback(_state, ErrorCode, _result);
             }
 
             public TResult Result => _result;
         }
 
-        private (bool completed, TResult result) DoAsyncReceiveOperation<TState, TResult>(TState state, Func<SafeSocketHandle, TState, (bool, TResult)> operation, Action<TState, TResult> callback, CancellationToken cancellationToken)
+        private (SocketError socketError, TResult result) DoAsyncReceiveOperation<TState, TResult>(
+            TState state,
+            Func<SafeSocketHandle, TState, (bool, SocketError, TResult)> operation,
+            Action<TState, SocketError, TResult> callback,
+            CancellationToken cancellationToken)
         {
             SetNonBlocking();
 
             int observedSequenceNumber;
             if (_receiveQueue.IsReady(this, out observedSequenceNumber))
             {
-                (bool completed, TResult result) = operation(_socket, state);
+                (bool completed, SocketError socketError, TResult result) = operation(_socket, state);
                 if (completed)
                 {
-                    return (true, result);
+                    return (socketError, result);
                 }
             }
 
@@ -1635,40 +1640,31 @@ namespace System.Net.Sockets
             if (!_receiveQueue.StartAsyncOperation(this, op, observedSequenceNumber, cancellationToken))
             {
                 //ReturnOperation(operation);
-                return (true, op.Result);
+                return (op.ErrorCode, op.Result);
             }
 
-            return (false, default!);
+            return (SocketError.IOPending, default!);
         }
 
         // This is just SocketPal.TryCompleteReceive without out params
-        private static (bool completed, (int bytesReceived, SocketError socketError) result) TryReceiveAsync(SafeSocketHandle socket, Memory<byte> buffer, SocketFlags flags)
+        private static (bool completed, SocketError socketError, int bytesReceived) TryReceiveAsync(SafeSocketHandle socket, Memory<byte> buffer, SocketFlags flags)
         {
             int bytesReceived;
             SocketError socketError;
             bool completed = SocketPal.TryCompleteReceive(socket, buffer.Span, flags, out bytesReceived, out socketError);
-            return (completed, (bytesReceived, socketError));
+            return (completed, socketError, bytesReceived);
         }
-
-        // TODO:
-        // Gotta wonder whether DoAsyncReceiveOperation should just return a SocketError, instead of returning completed and a SocketError.
 
         public SocketError ReceiveAsync(Memory<byte> buffer, SocketFlags flags, out int bytesReceived, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
         {
-            (bool completed, (int bytesReceived, SocketError socketError) result) = DoAsyncReceiveOperation(
+            SocketError socketError;
+            (socketError, bytesReceived) = DoAsyncReceiveOperation(
                 (buffer: buffer, flags: flags, callback: callback),
                 static (socket, state) => TryReceiveAsync(socket, state.buffer, state.flags),
-                static (state, result) => state.callback(result.bytesReceived, null, 0, SocketFlags.None, result.socketError),
+                static (state, socketError, bytesReceived) => state.callback(bytesReceived, null, 0, SocketFlags.None, socketError),
                 cancellationToken);
 
-            if (completed)
-            {
-                bytesReceived = result.bytesReceived;
-                return result.socketError;
-            }
-
-            bytesReceived = 0;
-            return SocketError.IOPending;
+            return socketError;
         }
 
         public SocketError ReceiveFromAsync(Memory<byte> buffer, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesReceived, out SocketFlags receivedFlags, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
