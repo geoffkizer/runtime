@@ -1443,11 +1443,34 @@ namespace System.Net.Sockets
                     e.Reset();
 
                     // We've been signalled to try to process the operation.
-                    OperationQueue<TOperation>.OperationResult result = queue.ProcessQueuedOperation(operation);
-                    if (result == OperationQueue<TOperation>.OperationResult.Completed ||
-                        result == OperationQueue<TOperation>.OperationResult.Cancelled)
+                    bool cancelled;
+                    (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                    if (cancelled)
                     {
-                        break;
+                        return;
+                    }
+
+                    while (true)
+                    {
+                        // Try to perform the IO
+                        // TODO: Why does TryComplete take a context if the op already has it?
+                        if (operation.TryComplete(operation.AssociatedContext))
+                        {
+                            queue.CompleteQueuedOperation(operation);
+                            return;
+                        }
+
+                        bool retry;
+                        (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
+                        if (cancelled)
+                        {
+                            return;
+                        }
+
+                        if (!retry)
+                        {
+                            break;
+                        }
                     }
 
                     // Couldn't process the operation.
