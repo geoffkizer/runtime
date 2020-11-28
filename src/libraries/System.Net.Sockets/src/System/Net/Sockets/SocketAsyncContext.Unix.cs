@@ -151,6 +151,9 @@ namespace System.Net.Sockets
 
             public bool TryComplete(SocketAsyncContext context)
             {
+                // TODO: Remove parameter?
+                Debug.Assert(context == AssociatedContext);
+
                 TraceWithContext(context, "Enter");
 
                 bool result = DoTryComplete(context);
