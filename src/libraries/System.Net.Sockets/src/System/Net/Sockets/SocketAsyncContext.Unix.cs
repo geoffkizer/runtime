@@ -1433,29 +1433,9 @@ namespace System.Net.Sockets
 
                 while (true)
                 {
-                    DateTime waitStart = DateTime.UtcNow;
-
-                    if (!operation.Event!.Wait(timeout))
+                    if (!WaitForSyncSignal(ref queue, operation, ref timeout))
                     {
-                        queue.CancelAndContinueProcessing(operation);
-                        operation.ErrorCode = SocketError.TimedOut;
                         return;
-                    }
-
-                    // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                    operation.Event!.Reset();
-
-                    // Adjust timeout for next attempt.
-                    if (timeout > 0)
-                    {
-                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                        if (timeout <= 0)
-                        {
-                            queue.CancelAndContinueProcessing(operation);
-                            operation.ErrorCode = SocketError.TimedOut;
-                            return;
-                        }
                     }
 
                     // We've been signalled to try to process the operation.
@@ -1489,6 +1469,40 @@ namespace System.Net.Sockets
 
                 }
             }
+        }
+
+        // Returns false when cancelled or timed out.
+        private bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, ref int timeout)
+            where TOperation : AsyncOperation
+        {
+            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+
+            DateTime waitStart = DateTime.UtcNow;
+
+            if (!operation.Event!.Wait(timeout))
+            {
+                queue.CancelAndContinueProcessing(operation);
+                operation.ErrorCode = SocketError.TimedOut;
+                return false;
+            }
+
+            // Reset the event now to avoid lost notifications if the processing is unsuccessful.
+            operation.Event!.Reset();
+
+            // Adjust timeout for next attempt.
+            if (timeout > 0)
+            {
+                timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                if (timeout <= 0)
+                {
+                    queue.CancelAndContinueProcessing(operation);
+                    operation.ErrorCode = SocketError.TimedOut;
+                    return false;
+                }
+            }
+
+            return true;
         }
 
 #if false
