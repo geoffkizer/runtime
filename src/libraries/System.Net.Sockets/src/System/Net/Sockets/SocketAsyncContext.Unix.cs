@@ -1409,100 +1409,59 @@ namespace System.Net.Sockets
             {
                 operation.Event = e;
 
-                bool cancelled;
-                bool retry;
+                bool isQueued = false;
                 while (true)
                 {
-                    (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                    bool cancelled = WaitForSyncRetry(ref queue, operation, ref timeout, ref isQueued, ref observedSequenceNumber);
                     if (cancelled)
                     {
-                        // Already processed
                         return;
-                    }
-
-                    if (!retry)
-                    {
-                        break;
                     }
 
                     if (operation.TryComplete(this))
                     {
-                        return;
-                    }
-                }
-
-                while (true)
-                {
-                    DateTime waitStart = DateTime.UtcNow;
-
-                    if (!e.Wait(timeout))
-                    {
-                        queue.CancelAndContinueProcessing(operation);
-                        operation.ErrorCode = SocketError.TimedOut;
-                        return;
-                    }
-
-                    // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                    e.Reset();
-
-                    // We've been signalled to try to process the operation.
-                    (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
-                    if (cancelled)
-                    {
-                        return;
-                    }
-
-                    while (true)
-                    {
-                        // Try to perform the IO
-                        // TODO: Why does TryComplete take a context if the op already has it?
-                        if (operation.TryComplete(operation.AssociatedContext))
+                        if (isQueued)
                         {
                             queue.CompleteQueuedOperation(operation);
-                            return;
                         }
 
-                        (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
-                        if (cancelled)
-                        {
-                            return;
-                        }
-
-                        if (!retry)
-                        {
-                            break;
-                        }
-                    }
-
-                    // Couldn't process the operation.
-                    // Adjust timeout and try again.
-                    if (timeout > 0)
-                    {
-                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                        if (timeout <= 0)
-                        {
-                            queue.CancelAndContinueProcessing(operation);
-                            operation.ErrorCode = SocketError.TimedOut;
-                            return;
-                        }
+                        return;
                     }
                 }
             }
         }
 
-#if false
-        // returns false on cancel
-        private bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, ref int observedSequenceNumber, ref bool inQueue)
+        // Returns false on cancel
+        private bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, ref int timeout, ref bool isQueued, ref int observedSequenceNumber)
             where TOperation : AsyncOperation
         {
             Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
-            Debug.Assert(operation.Event is not null);
 
-            if (!inQueue)
+            bool cancelled;
+            bool retry;
+            if (!isQueued)
             {
-                (bool aborted, bool retry) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
-                if (aborted)
+                // We're not in the queue yet.
+                // We need to try to add this operation to the queue, but also check for cancellation and retry.
+                (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                if (cancelled)
+                {
+                    return false;
+                }
+
+                if (retry)
+                {
+                    return true;
+                }
+
+                isQueued = true;
+            }
+            else
+            {
+                // We're in the queue and the previous attempt to complete the operation didn't succeed.
+                // We need to pend the operation again, but also check for cancellation and retry.
+                (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
+                if (cancelled)
                 {
                     return false;
                 }
@@ -1513,88 +1472,44 @@ namespace System.Net.Sockets
                 }
             }
 
-                while (true)
+            // We need to wait for the epoll signal.
+            DateTime waitStart = DateTime.UtcNow;
+
+            ManualResetEventSlim e = operation.Event!;
+            Debug.Assert(e is not null);
+
+            if (!e.Wait(timeout))
+            {
+                queue.CancelAndContinueProcessing(operation);
+                operation.ErrorCode = SocketError.TimedOut;
+                return false;
+            }
+
+            // Reset the event now to avoid lost notifications if the processing is unsuccessful.
+            e.Reset();
+
+            // Adjust timeout in case the processing is unsuccessful.
+            // TODO: Possibly hoist the timeout handling?
+            if (timeout > 0)
+            {
+                timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                if (timeout <= 0)
                 {
-                    (bool aborted, bool retry) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
-                    if (aborted)
-                    {
-                        // Already processed
-                        return;
-                    }
-
-                    if (!retry)
-                    {
-                        break;
-                    }
-
-                    if (operation.TryComplete(this))
-                    {
-                        return;
-                    }
-                }
-
-                while (true)
-                {
-                    DateTime waitStart = DateTime.UtcNow;
-
-                    if (!e.Wait(timeout))
-                    {
-                        queue.CancelAndContinueProcessing(operation);
-                        operation.ErrorCode = SocketError.TimedOut;
-                        return;
-                    }
-
-                    // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                    e.Reset();
-
-                    // We've been signalled to try to process the operation.
-                    bool cancelled;
-                    (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
-                    if (cancelled)
-                    {
-                        return;
-                    }
-
-                    while (true)
-                    {
-                        // Try to perform the IO
-                        // TODO: Why does TryComplete take a context if the op already has it?
-                        if (operation.TryComplete(operation.AssociatedContext))
-                        {
-                            queue.CompleteQueuedOperation(operation);
-                            return;
-                        }
-
-                        bool retry;
-                        (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
-                        if (cancelled)
-                        {
-                            return;
-                        }
-
-                        if (!retry)
-                        {
-                            break;
-                        }
-                    }
-
-                    // Couldn't process the operation.
-                    // Adjust timeout and try again.
-                    if (timeout > 0)
-                    {
-                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                        if (timeout <= 0)
-                        {
-                            queue.CancelAndContinueProcessing(operation);
-                            operation.ErrorCode = SocketError.TimedOut;
-                            return;
-                        }
-                    }
+                    // We'll time out on next attempt, if this one is unsuccessful.
+                    timeout = 0;
                 }
             }
+
+            // We've been signalled to try to process the operation.
+            (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+            if (cancelled)
+            {
+                return false;
+            }
+
+            return true;
         }
-#endif
 
         private bool ShouldRetrySyncOperation(out SocketError errorCode)
         {
