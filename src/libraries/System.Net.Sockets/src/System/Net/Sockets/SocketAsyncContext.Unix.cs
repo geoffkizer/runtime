@@ -844,6 +844,89 @@ namespace System.Net.Sockets
                 }
             }
 
+            // TODO: This is a modified version of above for sync operations.
+            // It doesn't actually invoke the operation....
+            // Returns aborted: true if the op was aborted due to queue being stopped
+            // Returns retry: true if we need to retry due to updated seq number
+            // Returns retry: false if we enqueued and will be signalled later.
+            public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
+            {
+                Trace(context, $"Enter");
+
+                if (!context.IsRegistered)
+                {
+                    context.Register();
+                }
+
+//                while (true)
+                {
+                    bool doAbort = false;
+                    using (Lock())
+                    {
+                        switch (_state)
+                        {
+                            case QueueState.Ready:
+                                if (observedSequenceNumber != _sequenceNumber)
+                                {
+                                    // The queue has become ready again since we previously checked it.
+                                    // So, we need to retry the operation before we enqueue it.
+                                    Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
+                                    observedSequenceNumber = _sequenceNumber;
+                                    break;
+                                }
+
+                                // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
+                                _state = QueueState.Waiting;
+                                goto case QueueState.Waiting;
+
+                            case QueueState.Waiting:
+                            case QueueState.Processing:
+                                // Enqueue the operation.
+                                Debug.Assert(operation.Next == operation, "Expected operation.Next == operation");
+
+                                if (_tail == null)
+                                {
+                                    Debug.Assert(!_isNextOperationSynchronous);
+                                    _isNextOperationSynchronous = operation.Event != null;
+                                }
+                                else
+                                {
+                                    operation.Next = _tail.Next;
+                                    _tail.Next = operation;
+                                }
+
+                                _tail = operation;
+                                Trace(context, $"Leave, enqueued {IdOf(operation)}");
+
+                                return (aborted: false, retry: false);
+
+                            case QueueState.Stopped:
+                                Debug.Assert(_tail == null);
+                                doAbort = true;
+                                break;
+
+                            default:
+                                Environment.FailFast("unexpected queue state");
+                                break;
+                        }
+                    }
+
+                    if (doAbort)
+                    {
+                        operation.DoAbort();
+                        Trace(context, $"Leave, queue stopped");
+                        return (aborted: true, retry: false);
+                    }
+
+                    // Retry the operation.
+//                    if (operation.TryComplete(context))
+                    {
+                        Trace(context, $"Leave, retry succeeded");
+                        return (aborted: false, retry: true);
+                    }
+                }
+            }
+
             public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
             {
                 AsyncOperation op;
@@ -1279,10 +1362,24 @@ namespace System.Net.Sockets
             {
                 operation.Event = e;
 
-                if (!queue.StartAsyncOperation(this, operation, observedSequenceNumber))
+                while (true)
                 {
-                    // Completed synchronously
-                    return;
+                    (bool aborted, bool retry) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                    if (aborted)
+                    {
+                        // Already processed
+                        return;
+                    }
+
+                    if (!retry)
+                    {
+                        break;
+                    }
+
+                    if (operation.TryComplete(this))
+                    {
+                        return;
+                    }
                 }
 
                 bool timeoutExpired = false;
