@@ -1435,7 +1435,7 @@ namespace System.Net.Sockets
                 {
                     DateTime waitStart = DateTime.UtcNow;
 
-                    if (!e.Wait(timeout))
+                    if (!operation.Event!.Wait(timeout))
                     {
                         queue.CancelAndContinueProcessing(operation);
                         operation.ErrorCode = SocketError.TimedOut;
@@ -1443,7 +1443,7 @@ namespace System.Net.Sockets
                     }
 
                     // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                    e.Reset();
+                    operation.Event!.Reset();
 
                     // We've been signalled to try to process the operation.
                     (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
