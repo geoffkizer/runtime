@@ -852,7 +852,7 @@ namespace System.Net.Sockets
             // Returns aborted: true if the op was aborted due to queue being stopped
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
-            public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
+            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
             {
                 Trace(context, $"Enter");
 
@@ -861,73 +861,67 @@ namespace System.Net.Sockets
                     context.Register();
                 }
 
-//                while (true)
+                bool doAbort = false;
+                using (Lock())
                 {
-                    bool doAbort = false;
-                    using (Lock())
+                    switch (_state)
                     {
-                        switch (_state)
-                        {
-                            case QueueState.Ready:
-                                if (observedSequenceNumber != _sequenceNumber)
-                                {
-                                    // The queue has become ready again since we previously checked it.
-                                    // So, we need to retry the operation before we enqueue it.
-                                    Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
-                                    observedSequenceNumber = _sequenceNumber;
-                                    break;
-                                }
-
-                                // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                                _state = QueueState.Waiting;
-                                goto case QueueState.Waiting;
-
-                            case QueueState.Waiting:
-                            case QueueState.Processing:
-                                // Enqueue the operation.
-                                Debug.Assert(operation.Next == operation, "Expected operation.Next == operation");
-
-                                if (_tail == null)
-                                {
-                                    Debug.Assert(!_isNextOperationSynchronous);
-                                    _isNextOperationSynchronous = operation.Event != null;
-                                }
-                                else
-                                {
-                                    operation.Next = _tail.Next;
-                                    _tail.Next = operation;
-                                }
-
-                                _tail = operation;
-                                Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                                return (aborted: false, retry: false);
-
-                            case QueueState.Stopped:
-                                Debug.Assert(_tail == null);
-                                doAbort = true;
+                        case QueueState.Ready:
+                            if (observedSequenceNumber != _sequenceNumber)
+                            {
+                                // The queue has become ready again since we previously checked it.
+                                // So, we need to retry the operation before we enqueue it.
+                                Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
+                                observedSequenceNumber = _sequenceNumber;
                                 break;
+                            }
 
-                            default:
-                                Environment.FailFast("unexpected queue state");
-                                break;
-                        }
-                    }
+                            // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
+                            _state = QueueState.Waiting;
+                            goto case QueueState.Waiting;
 
-                    if (doAbort)
-                    {
-                        operation.DoAbort();
-                        Trace(context, $"Leave, queue stopped");
-                        return (aborted: true, retry: false);
-                    }
+                        case QueueState.Waiting:
+                        case QueueState.Processing:
+                            // Enqueue the operation.
+                            Debug.Assert(operation.Next == operation, "Expected operation.Next == operation");
 
-                    // Retry the operation.
-//                    if (operation.TryComplete(context))
-                    {
-                        Trace(context, $"Leave, retry succeeded");
-                        return (aborted: false, retry: true);
+                            if (_tail == null)
+                            {
+                                Debug.Assert(!_isNextOperationSynchronous);
+                                _isNextOperationSynchronous = operation.Event != null;
+                            }
+                            else
+                            {
+                                operation.Next = _tail.Next;
+                                _tail.Next = operation;
+                            }
+
+                            _tail = operation;
+                            Trace(context, $"Leave, enqueued {IdOf(operation)}");
+
+                            return (aborted: false, retry: false, observedSequenceNumber: 0);
+
+                        case QueueState.Stopped:
+                            Debug.Assert(_tail == null);
+                            doAbort = true;
+                            break;
+
+                        default:
+                            Environment.FailFast("unexpected queue state");
+                            break;
                     }
                 }
+
+                if (doAbort)
+                {
+                    operation.DoAbort();
+                    Trace(context, $"Leave, queue stopped");
+                    return (aborted: true, retry: false, observedSequenceNumber: 0);
+                }
+
+                // Tell the caller to retry the operation.
+                Trace(context, $"Leave, signal retry");
+                return (aborted: false, retry: true, observedSequenceNumber: observedSequenceNumber);
             }
 
             public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
@@ -1402,6 +1396,10 @@ namespace System.Net.Sockets
             }
         }
 
+        // Next step here:
+        // Refactor this into two routines, one that does the waiting/retry logic, one that just invokes the op
+        // So that eventually I can push op invocation up a level
+        // So, something like WaitForSyncRetry
         private void PerformSyncOperation<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, int observedSequenceNumber)
             where TOperation : AsyncOperation
         {
@@ -1410,6 +1408,110 @@ namespace System.Net.Sockets
             using (var e = new ManualResetEventSlim(false, 0))
             {
                 operation.Event = e;
+
+                bool cancelled;
+                bool retry;
+                while (true)
+                {
+                    (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        // Already processed
+                        return;
+                    }
+
+                    if (!retry)
+                    {
+                        break;
+                    }
+
+                    if (operation.TryComplete(this))
+                    {
+                        return;
+                    }
+                }
+
+                while (true)
+                {
+                    DateTime waitStart = DateTime.UtcNow;
+
+                    if (!e.Wait(timeout))
+                    {
+                        queue.CancelAndContinueProcessing(operation);
+                        operation.ErrorCode = SocketError.TimedOut;
+                        return;
+                    }
+
+                    // Reset the event now to avoid lost notifications if the processing is unsuccessful.
+                    e.Reset();
+
+                    // We've been signalled to try to process the operation.
+                    (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                    if (cancelled)
+                    {
+                        return;
+                    }
+
+                    while (true)
+                    {
+                        // Try to perform the IO
+                        // TODO: Why does TryComplete take a context if the op already has it?
+                        if (operation.TryComplete(operation.AssociatedContext))
+                        {
+                            queue.CompleteQueuedOperation(operation);
+                            return;
+                        }
+
+                        (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
+                        if (cancelled)
+                        {
+                            return;
+                        }
+
+                        if (!retry)
+                        {
+                            break;
+                        }
+                    }
+
+                    // Couldn't process the operation.
+                    // Adjust timeout and try again.
+                    if (timeout > 0)
+                    {
+                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                        if (timeout <= 0)
+                        {
+                            queue.CancelAndContinueProcessing(operation);
+                            operation.ErrorCode = SocketError.TimedOut;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+#if false
+        // returns false on cancel
+        private bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, ref int observedSequenceNumber, ref bool inQueue)
+            where TOperation : AsyncOperation
+        {
+            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+            Debug.Assert(operation.Event is not null);
+
+            if (!inQueue)
+            {
+                (bool aborted, bool retry) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                if (aborted)
+                {
+                    return false;
+                }
+
+                if (retry)
+                {
+                    return true;
+                }
+            }
 
                 while (true)
                 {
@@ -1492,6 +1594,7 @@ namespace System.Net.Sockets
                 }
             }
         }
+#endif
 
         private bool ShouldRetrySyncOperation(out SocketError errorCode)
         {
