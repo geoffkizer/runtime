@@ -1445,6 +1445,19 @@ namespace System.Net.Sockets
                     // Reset the event now to avoid lost notifications if the processing is unsuccessful.
                     operation.Event!.Reset();
 
+                    // Adjust timeout for next attempt.
+                    if (timeout > 0)
+                    {
+                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                        if (timeout <= 0)
+                        {
+                            queue.CancelAndContinueProcessing(operation);
+                            operation.ErrorCode = SocketError.TimedOut;
+                            return;
+                        }
+                    }
+
                     // We've been signalled to try to process the operation.
                     (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
                     if (cancelled)
@@ -1474,19 +1487,6 @@ namespace System.Net.Sockets
                         }
                     }
 
-                    // Couldn't process the operation.
-                    // Adjust timeout and try again.
-                    if (timeout > 0)
-                    {
-                        timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                        if (timeout <= 0)
-                        {
-                            queue.CancelAndContinueProcessing(operation);
-                            operation.ErrorCode = SocketError.TimedOut;
-                            return;
-                        }
-                    }
                 }
             }
         }
