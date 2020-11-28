@@ -1496,8 +1496,9 @@ namespace System.Net.Sockets
 
                 if (timeout <= 0)
                 {
-                    // We'll time out on next attempt, if this one is unsuccessful.
-                    timeout = 0;
+                    queue.CancelAndContinueProcessing(operation);
+                    operation.ErrorCode = SocketError.TimedOut;
+                    return false;
                 }
             }
 
