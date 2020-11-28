@@ -1409,30 +1409,35 @@ namespace System.Net.Sockets
             {
                 operation.Event = e;
 
-                bool cancelled;
-                bool retry;
-                while (true)
-                {
-                    (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
-                    if (cancelled)
-                    {
-                        // Already processed
-                        return;
-                    }
-
-                    if (!retry)
-                    {
-                        break;
-                    }
-
-                    if (operation.TryComplete(this))
-                    {
-                        return;
-                    }
-                }
+                bool inQueue = false;
 
                 while (true)
                 {
+                    bool cancelled;
+                    bool retry;
+
+                    if (!inQueue)
+                    {
+                        (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
+                        if (cancelled)
+                        {
+                            // Already processed
+                            return;
+                        }
+
+                        if (!retry)
+                        {
+                            break;
+                        }
+
+                        if (operation.TryComplete(this))
+                        {
+                            return;
+                        }
+
+                        inQueue = true;
+                    }
+
                     if (!WaitForSyncSignal(ref queue, operation, ref timeout))
                     {
                         return;
@@ -1466,7 +1471,6 @@ namespace System.Net.Sockets
                             break;
                         }
                     }
-
                 }
             }
         }
