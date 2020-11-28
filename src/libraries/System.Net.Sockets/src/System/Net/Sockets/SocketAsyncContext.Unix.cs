@@ -1431,15 +1431,15 @@ namespace System.Net.Sockets
                     }
                 }
 
-                bool timeoutExpired = false;
                 while (true)
                 {
                     DateTime waitStart = DateTime.UtcNow;
 
                     if (!e.Wait(timeout))
                     {
-                        timeoutExpired = true;
-                        break;
+                        queue.CancelAndContinueProcessing(operation);
+                        operation.ErrorCode = SocketError.TimedOut;
+                        return;
                     }
 
                     // Reset the event now to avoid lost notifications if the processing is unsuccessful.
@@ -1484,16 +1484,11 @@ namespace System.Net.Sockets
 
                         if (timeout <= 0)
                         {
-                            timeoutExpired = true;
-                            break;
+                            queue.CancelAndContinueProcessing(operation);
+                            operation.ErrorCode = SocketError.TimedOut;
+                            return;
                         }
                     }
-                }
-
-                if (timeoutExpired)
-                {
-                    queue.CancelAndContinueProcessing(operation);
-                    operation.ErrorCode = SocketError.TimedOut;
                 }
             }
         }
