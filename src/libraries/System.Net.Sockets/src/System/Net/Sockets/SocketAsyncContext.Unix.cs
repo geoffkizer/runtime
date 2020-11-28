@@ -1046,7 +1046,6 @@ namespace System.Net.Sockets
                     }
                 }
 
-                bool wasCompleted = false;
                 while (true)
                 {
                     // Try to change the op state to Running.
@@ -1054,15 +1053,16 @@ namespace System.Net.Sockets
                     // and we should just remove it from the queue without further processing.
                     if (!op.TrySetRunning())
                     {
-                        break;
+                        RemoveQueuedOperation(op);
+                        return OperationResult.Cancelled;
                     }
 
                     // Try to perform the IO
                     if (op.TryComplete(context))
                     {
                         op.SetComplete();
-                        wasCompleted = true;
-                        break;
+                        RemoveQueuedOperation(op);
+                        return OperationResult.Completed;
                     }
 
                     op.SetWaiting();
@@ -1097,11 +1097,6 @@ namespace System.Net.Sockets
                         }
                     }
                 }
-
-                // Remove the op from the queue and see if there's more to process.
-                RemoveQueuedOperation(op);
-
-                return (wasCompleted ? OperationResult.Completed : OperationResult.Cancelled);
             }
 
 #if false
