@@ -1405,11 +1405,45 @@ namespace System.Net.Sockets
 
             public SyncOperationState(int timeout, int observedSequenceNumber)
             {
+                Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+
                 _timeout = timeout;
                 _waitEvent = new ManualResetEventSlim(false, 0);
                 _isInQueue = false;
                 _observedSequenceNumber = observedSequenceNumber;
             }
+
+            public bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                DateTime waitStart = DateTime.UtcNow;
+
+                if (!operation.Event!.Wait(_timeout))
+                {
+                    queue.CancelAndContinueProcessing(operation);
+                    operation.ErrorCode = SocketError.TimedOut;
+                    return false;
+                }
+
+                // Reset the event now to avoid lost notifications if the processing is unsuccessful.
+                operation.Event!.Reset();
+
+                // Adjust timeout for next attempt.
+                if (_timeout > 0)
+                {
+                    _timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                    if (_timeout <= 0)
+                    {
+                        queue.CancelAndContinueProcessing(operation);
+                        operation.ErrorCode = SocketError.TimedOut;
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
 
             public void Dispose()
             {
@@ -1466,7 +1500,7 @@ namespace System.Net.Sockets
                     // Note we modify inQueue above so we can't just do an else here
                     if (state._isInQueue)
                     {
-                        if (!WaitForSyncSignal(ref queue, operation, ref timeout))
+                        if (!state.WaitForSyncSignal(ref queue, operation))
                         {
                             return;
                         }
@@ -1508,6 +1542,7 @@ namespace System.Net.Sockets
             }
         }
 
+#if false
         // Returns false when cancelled or timed out.
         private bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, ref int timeout)
             where TOperation : AsyncOperation
@@ -1541,6 +1576,8 @@ namespace System.Net.Sockets
 
             return true;
         }
+#endif
+
 
 #if false
         // returns false on cancel
