@@ -1413,6 +1413,7 @@ namespace System.Net.Sockets
                 _observedSequenceNumber = observedSequenceNumber;
             }
 
+            // TODO: COuld be merged below?
             public bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
                 where TOperation : AsyncOperation
             {
@@ -1444,6 +1445,78 @@ namespace System.Net.Sockets
                 return true;
             }
 
+            // False means cancellation (or timeout)
+            public bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                bool cancelled;
+                bool retry;
+                if (!_isInQueue)
+                {
+                    (cancelled, retry, _observedSequenceNumber) = queue.StartSyncOperation(operation.AssociatedContext, operation, _observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        return false;
+                    }
+
+                    if (retry)
+                    {
+                        return true;
+                    }
+
+                    _isInQueue = true;
+
+                    if (!WaitForSyncSignal(ref queue, operation))
+                    {
+                        // Timeout occurred
+                        return false;
+                    }
+
+                    (cancelled, _observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                    if (cancelled)
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                // We just tried to execute the queued operation, but it failed.
+                (cancelled, retry, _observedSequenceNumber) = queue.PendQueuedOperation(operation, _observedSequenceNumber);
+                if (cancelled)
+                {
+                    return false;
+                }
+
+                if (retry)
+                {
+                    return true;
+                }
+
+                if (!WaitForSyncSignal(ref queue, operation))
+                {
+                    // Timeout occurred
+                    return false;
+                }
+
+                // We've been signalled to try to process the operation.
+                (cancelled, _observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                if (cancelled)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            public void Complete<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                if (_isInQueue)
+                {
+                    queue.CompleteQueuedOperation(operation);
+                }
+            }
 
             public void Dispose()
             {
@@ -1451,6 +1524,41 @@ namespace System.Net.Sockets
             }
         }
 
+
+
+        private void PerformSyncOperation<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, int observedSequenceNumber)
+            where TOperation : AsyncOperation
+        {
+            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+
+            var state = new SyncOperationState(timeout, observedSequenceNumber);
+            try
+            {
+                operation.Event = state._waitEvent;
+
+                while (true)
+                {
+                    bool tryAgain = state.WaitForSyncRetry(ref queue, operation);
+                    if (!tryAgain)
+                    {
+                        // Cancellation or timeout
+                        return;
+                    }
+
+                    if (operation.TryComplete(this))
+                    {
+                        state.Complete(ref queue, operation);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                state.Dispose();
+            }
+        }
+
+#if false
         // Next step here:
         // Refactor this into two routines, one that does the waiting/retry logic, one that just invokes the op
         // So that eventually I can push op invocation up a level
@@ -1502,6 +1610,7 @@ namespace System.Net.Sockets
                     {
                         if (!state.WaitForSyncSignal(ref queue, operation))
                         {
+                            // Timeout occurred
                             return;
                         }
 
@@ -1541,6 +1650,8 @@ namespace System.Net.Sockets
                 state.Dispose();
             }
         }
+#endif
+
 
 #if false
         // Returns false when cancelled or timed out.
