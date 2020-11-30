@@ -1465,32 +1465,20 @@ namespace System.Net.Sockets
                     }
 
                     _isInQueue = true;
-
-                    if (!WaitForSyncSignal(ref queue, operation))
-                    {
-                        // Timeout occurred
-                        return false;
-                    }
-
-                    (cancelled, _observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                }
+                else
+                {
+                    // We just tried to execute the queued operation, but it failed.
+                    (cancelled, retry, _observedSequenceNumber) = queue.PendQueuedOperation(operation, _observedSequenceNumber);
                     if (cancelled)
                     {
                         return false;
                     }
 
-                    return true;
-                }
-
-                // We just tried to execute the queued operation, but it failed.
-                (cancelled, retry, _observedSequenceNumber) = queue.PendQueuedOperation(operation, _observedSequenceNumber);
-                if (cancelled)
-                {
-                    return false;
-                }
-
-                if (retry)
-                {
-                    return true;
+                    if (retry)
+                    {
+                        return true;
+                    }
                 }
 
                 if (!WaitForSyncSignal(ref queue, operation))
