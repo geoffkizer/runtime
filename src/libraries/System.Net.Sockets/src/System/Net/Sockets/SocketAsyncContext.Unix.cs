@@ -1425,15 +1425,18 @@ namespace System.Net.Sockets
                             return;
                         }
 
-                        if (!retry)
+                        if (retry)
+                        {
+                            if (operation.TryComplete(this))
+                            {
+                                return;
+                            }
+
+                            // Retry failed, we need to go loop again
+                        }
+                        else
                         {
                             inQueue = true;
-                            break;
-                        }
-
-                        if (operation.TryComplete(this))
-                        {
-                            return;
                         }
                     }
 
