@@ -1437,37 +1437,41 @@ namespace System.Net.Sockets
                         }
                     }
 
-                    if (!WaitForSyncSignal(ref queue, operation, ref timeout))
+                    // Note we modify inQueue above so we can't just do an else here
+                    if (inQueue)
                     {
-                        return;
-                    }
-
-                    // We've been signalled to try to process the operation.
-                    (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
-                    if (cancelled)
-                    {
-                        return;
-                    }
-
-                    while (true)
-                    {
-                        // Try to perform the IO
-                        // TODO: Why does TryComplete take a context if the op already has it?
-                        if (operation.TryComplete(operation.AssociatedContext))
+                        if (!WaitForSyncSignal(ref queue, operation, ref timeout))
                         {
-                            queue.CompleteQueuedOperation(operation);
                             return;
                         }
 
-                        (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
+                        // We've been signalled to try to process the operation.
+                        (cancelled, observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
                         if (cancelled)
                         {
                             return;
                         }
 
-                        if (!retry)
+                        while (true)
                         {
-                            break;
+                            // Try to perform the IO
+                            // TODO: Why does TryComplete take a context if the op already has it?
+                            if (operation.TryComplete(operation.AssociatedContext))
+                            {
+                                queue.CompleteQueuedOperation(operation);
+                                return;
+                            }
+
+                            (cancelled, retry, observedSequenceNumber) = queue.PendQueuedOperation(operation, observedSequenceNumber);
+                            if (cancelled)
+                            {
+                                return;
+                            }
+
+                            if (!retry)
+                            {
+                                break;
+                            }
                         }
                     }
                 }
