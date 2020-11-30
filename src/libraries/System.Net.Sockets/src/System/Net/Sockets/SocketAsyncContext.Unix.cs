@@ -1396,27 +1396,50 @@ namespace System.Net.Sockets
             }
         }
 
+        private struct SyncOperationState : IDisposable
+        {
+            public ManualResetEventSlim _waitEvent;
+            public bool _isInQueue;
+            public int _timeout;
+            public int _observedSequenceNumber;
+
+            public SyncOperationState(int timeout, int observedSequenceNumber)
+            {
+                _timeout = timeout;
+                _waitEvent = new ManualResetEventSlim(false, 0);
+                _isInQueue = false;
+                _observedSequenceNumber = observedSequenceNumber;
+            }
+
+            public void Dispose()
+            {
+                _waitEvent.Dispose();
+            }
+        }
+
         // Next step here:
         // Refactor this into two routines, one that does the waiting/retry logic, one that just invokes the op
         // So that eventually I can push op invocation up a level
         // So, something like WaitForSyncRetry
+
+
+
         private void PerformSyncOperation<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, int observedSequenceNumber)
             where TOperation : AsyncOperation
         {
             Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
-            using (var e = new ManualResetEventSlim(false, 0))
+            var state = new SyncOperationState(timeout, observedSequenceNumber);
+            try
             {
-                operation.Event = e;
-
-                bool inQueue = false;
+                operation.Event = state._waitEvent;
 
                 while (true)
                 {
                     bool cancelled;
                     bool retry;
 
-                    if (!inQueue)
+                    if (!state._isInQueue)
                     {
                         (cancelled, retry, observedSequenceNumber) = queue.StartSyncOperation(this, operation, observedSequenceNumber);
                         if (cancelled)
@@ -1436,12 +1459,12 @@ namespace System.Net.Sockets
                         }
                         else
                         {
-                            inQueue = true;
+                            state._isInQueue = true;
                         }
                     }
 
                     // Note we modify inQueue above so we can't just do an else here
-                    if (inQueue)
+                    if (state._isInQueue)
                     {
                         if (!WaitForSyncSignal(ref queue, operation, ref timeout))
                         {
@@ -1478,6 +1501,10 @@ namespace System.Net.Sockets
                         }
                     }
                 }
+            }
+            finally
+            {
+                state.Dispose();
             }
         }
 
