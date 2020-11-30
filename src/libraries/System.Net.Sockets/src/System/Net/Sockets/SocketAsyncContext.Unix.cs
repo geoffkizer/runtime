@@ -1427,6 +1427,7 @@ namespace System.Net.Sockets
 
                         if (!retry)
                         {
+                            inQueue = true;
                             break;
                         }
 
@@ -1434,8 +1435,6 @@ namespace System.Net.Sockets
                         {
                             return;
                         }
-
-                        inQueue = true;
                     }
 
                     if (!WaitForSyncSignal(ref queue, operation, ref timeout))
