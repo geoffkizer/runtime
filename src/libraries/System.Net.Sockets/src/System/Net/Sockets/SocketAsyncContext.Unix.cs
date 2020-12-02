@@ -906,10 +906,11 @@ namespace System.Net.Sockets
             // Returns aborted: true if the op was aborted due to queue being stopped
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
-            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
+            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
             {
                 Trace(context, $"Enter");
 
+                // TODO: This could probably be popped up a level, or handled differently...
                 if (!context.IsRegistered)
                 {
                     context.Register();
@@ -952,6 +953,14 @@ namespace System.Net.Sockets
 
                             _tail = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
+
+                            // Now that the object is enqueued, hook up cancellation.
+                            // Note that it's possible the call to register itself could
+                            // call TryCancel, so we do this after the op is fully enqueued.
+                            if (cancellationToken.CanBeCanceled)
+                            {
+                                operation.CancellationRegistration = cancellationToken.UnsafeRegister(s => ((TOperation)s!).TryCancel(), operation);
+                            }
 
                             return (aborted: false, retry: false, observedSequenceNumber: 0);
 
@@ -1583,13 +1592,13 @@ namespace System.Net.Sockets
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
                     if (cancelled)
                     {
-                        _operation.Event!.Dispose();
+                        Cleanup();
                         return (false, _operation.ErrorCode);
                     }
 
                     if (retry)
                     {
-                        _operation.Event!.Dispose();
+                        Cleanup();
                         return (true, default);
                     }
 
@@ -1601,7 +1610,7 @@ namespace System.Net.Sockets
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                     if (cancelled)
                     {
-                        _operation.Event!.Dispose();
+                        Cleanup();
                         return (false, _operation.ErrorCode);
                     }
 
@@ -1614,7 +1623,7 @@ namespace System.Net.Sockets
                 if (!WaitForSyncSignal())
                 {
                     // Timeout occurred
-                    _operation.Event!.Dispose();
+                    Cleanup();
                     return (false, _operation.ErrorCode);
                 }
 
@@ -1622,7 +1631,7 @@ namespace System.Net.Sockets
                 (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
-                    _operation.Event!.Dispose();
+                    Cleanup();
                     return (false, _operation.ErrorCode);
                 }
 
@@ -1663,14 +1672,16 @@ namespace System.Net.Sockets
                     // Allocate the TCS we will wait on
                     _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, cancellationToken);
                     if (cancelled)
                     {
+                        Cleanup();
                         return (false, _operation.ErrorCode);
                     }
 
                     if (retry)
                     {
+                        Cleanup();
                         return (true, default);
                     }
 
@@ -1682,7 +1693,7 @@ namespace System.Net.Sockets
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                     if (cancelled)
                     {
-                        _operation.Event!.Dispose();
+                        Cleanup();
                         return (false, _operation.ErrorCode);
                     }
 
@@ -1695,6 +1706,7 @@ namespace System.Net.Sockets
                 if (!await WaitForAsyncSignal(cancellationToken).ConfigureAwait(false))
                 {
                     // Cancellation occurred
+                    Cleanup();
                     return (false, _operation.ErrorCode);
                 }
 
@@ -1702,6 +1714,7 @@ namespace System.Net.Sockets
                 (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
+                    Cleanup();
                     return (false, _operation.ErrorCode);
                 }
 
@@ -1715,10 +1728,19 @@ namespace System.Net.Sockets
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
                 }
 
+                Cleanup();
+            }
+
+            private void Cleanup()
+            {
                 _operation.Event?.Dispose();
                 _operation.Event = null;
 
                 _operation.CompletionSource = null;
+
+                // TODO: unregister the cancellation token
+
+                _operation.CancellationRegistration.Unregister();
             }
         }
 
