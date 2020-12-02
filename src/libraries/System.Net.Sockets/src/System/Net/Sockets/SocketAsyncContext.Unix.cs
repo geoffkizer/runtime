@@ -1985,6 +1985,8 @@ namespace System.Net.Sockets
 
         public SocketError ReceiveFrom(IList<ArraySegment<byte>> buffers, ref SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesReceived)
         {
+            SocketError errorCode;
+
             var state = CreateReadOperationState(timeout);
             while (true)
             {
