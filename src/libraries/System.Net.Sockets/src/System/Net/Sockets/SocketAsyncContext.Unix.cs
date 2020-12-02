@@ -1536,7 +1536,7 @@ namespace System.Net.Sockets
             return new SyncOperationState2<ReadOperation>(timeout, new DumbSyncReceiveOperation(this));
         }
 
-        private struct SyncOperationState2<T> : IDisposable
+        private struct SyncOperationState2<T>
             where T : AsyncOperation2<T>
         {
             private bool _isStarted;            // TODO: these should be combined into a single state? But I probably should look at stuff like StartSyncOperation in more detail
@@ -1671,12 +1671,6 @@ namespace System.Net.Sockets
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
                     _operation.Event!.Dispose();
                 }
-            }
-
-            // TODO: Remove IDIsposable
-            public void Dispose()
-            {
-                //_waitEvent.Dispose();
             }
         }
 
