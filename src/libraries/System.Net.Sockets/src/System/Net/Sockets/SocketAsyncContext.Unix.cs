@@ -1985,33 +1985,24 @@ namespace System.Net.Sockets
 
         public SocketError ReceiveFrom(IList<ArraySegment<byte>> buffers, ref SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesReceived)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
-
-            SocketFlags receivedFlags;
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteReceiveFrom(_socket, buffers, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+            var state = CreateReadOperationState(timeout);
+            while (true)
             {
-                flags = receivedFlags;
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    bytesReceived = default;
+                    return errorCode;
+                }
+
+                if (SocketPal.TryCompleteReceiveFrom(_socket, buffers, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                {
+                    state.Complete();
+                    flags = receivedFlags;
+                    return errorCode;
+                }
             }
-
-            var operation = new BufferListReceiveOperation(this)
-            {
-                Buffers = buffers,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen
-            };
-
-            PerformSyncOperation(ref _receiveQueue, operation, timeout, observedSequenceNumber);
-
-            socketAddressLen = operation.SocketAddressLen;
-            flags = operation.ReceivedFlags;
-            bytesReceived = operation.BytesTransferred;
-            return operation.ErrorCode;
         }
 
         public SocketError ReceiveFromAsync(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesReceived, out SocketFlags receivedFlags, Action<int, byte[]?, int, SocketFlags, SocketError> callback)
