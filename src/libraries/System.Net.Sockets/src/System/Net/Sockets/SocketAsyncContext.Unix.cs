@@ -2201,35 +2201,26 @@ namespace System.Net.Sockets
 
         public SocketError SendTo(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesSent)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+            SocketError errorCode;
 
             bytesSent = 0;
-            int bufferIndex = 0;
-            int offset = 0;
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+            int bufferIndex = 0, offset = 0;
+            var state = CreateWriteOperationState(timeout);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    return errorCode;
+                }
+
+                if (SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return errorCode;
+                }
             }
-
-            var operation = new BufferListSendOperation(this)
-            {
-                Buffers = buffers,
-                BufferIndex = bufferIndex,
-                Offset = offset,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-                BytesTransferred = bytesSent
-            };
-
-            PerformSyncOperation(ref _sendQueue, operation, timeout, observedSequenceNumber);
-
-            bytesSent = operation.BytesTransferred;
-            return operation.ErrorCode;
         }
 
         public SocketError SendToAsync(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesSent, Action<int, byte[]?, int, SocketFlags, SocketError> callback)
