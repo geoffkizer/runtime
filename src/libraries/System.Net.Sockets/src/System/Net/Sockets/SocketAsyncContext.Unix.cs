@@ -1711,15 +1711,12 @@ namespace System.Net.Sockets
                 if (_isInQueue)
                 {
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
-                    _operation.Event!.Dispose();
-                    _operation.Event = null;
-                    _operation.CompletionSource = null;
                 }
-                else
-                {
-                    Debug.Assert(_operation.Event == null);
-                    Debug.Assert(_operation.CompletionSource == null);
-                }
+
+                _operation.Event?.Dispose();
+                _operation.Event = null;
+
+                _operation.CompletionSource = null;
             }
         }
 
