@@ -2262,30 +2262,25 @@ namespace System.Net.Sockets
 
         public SocketError SendFile(SafeFileHandle fileHandle, long offset, long count, int timeout, out long bytesSent)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+            SocketError errorCode;
 
             bytesSent = 0;
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteSendFile(_socket, fileHandle, ref offset, ref count, ref bytesSent, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+            var state = CreateWriteOperationState(timeout);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    return errorCode;
+                }
+
+                if (SocketPal.TryCompleteSendFile(_socket, fileHandle, ref offset, ref count, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return errorCode;
+                }
             }
-
-            var operation = new SendFileOperation(this)
-            {
-                FileHandle = fileHandle,
-                Offset = offset,
-                Count = count,
-                BytesTransferred = bytesSent
-            };
-
-            PerformSyncOperation(ref _sendQueue, operation, timeout, observedSequenceNumber);
-
-            bytesSent = operation.BytesTransferred;
-            return operation.ErrorCode;
         }
 
         public SocketError SendFileAsync(SafeFileHandle fileHandle, long offset, long count, out long bytesSent, Action<long, SocketError> callback)
