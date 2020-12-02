@@ -1738,16 +1738,8 @@ namespace System.Net.Sockets
                 return errorCode;
             }
 
+            // TODO: Pass event from SyncOperationState
             var operation = new DumbSyncReceiveOperation(this);
-#if false
-            var operation = new BufferMemoryReceiveOperation(this)
-            {
-                Buffer = buffer,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-            };
-#endif
 
             // This is PerformSyncOperation
             var state = new SyncOperationState(timeout, observedSequenceNumber);
@@ -1781,8 +1773,9 @@ namespace System.Net.Sockets
             // TODO: Note the results aren't on the operation anymore, so this seems unnecessary, except probably for the error code
             // We are only going to hit this path on cancellation or some other failure, see above
             Debug.Assert(operation.ErrorCode != SocketError.Success);
-            flags = operation.ReceivedFlags;
-            bytesReceived = operation.BytesTransferred;
+
+            flags = default;
+            bytesReceived = default;
             return operation.ErrorCode;
         }
 
