@@ -1800,28 +1800,35 @@ namespace System.Net.Sockets
             Debug.Assert(socketAddress != null, "Expected non-null socketAddress");
             Debug.Assert(socketAddressLen > 0, $"Unexpected socketAddressLen: {socketAddressLen}");
 
+            SocketError errorCode;
+
             // Connect is different than the usual "readiness" pattern of other operations.
             // We need to call TryStartConnect to initiate the connect with the OS,
             // before we try to complete it via epoll notification.
             // Thus, always call TryStartConnect regardless of readiness.
-            SocketError errorCode;
-            int observedSequenceNumber;
-            _sendQueue.IsReady(this, out observedSequenceNumber);
             if (SocketPal.TryStartConnect(_socket, socketAddress, socketAddressLen, out errorCode))
             {
                 _socket.RegisterConnectResult(errorCode);
                 return errorCode;
             }
 
-            var operation = new ConnectOperation(this)
+            var state = CreateWriteOperationState(-1);
+            while (true)
             {
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen
-            };
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    return errorCode;
+                }
 
-            PerformSyncOperation(ref _sendQueue, operation, -1, observedSequenceNumber);
-
-            return operation.ErrorCode;
+                if (SocketPal.TryCompleteConnect(_socket, socketAddressLen, out errorCode))
+                {
+                    state.Complete();
+                    _socket.RegisterConnectResult(errorCode);
+                    return errorCode;
+                }
+            }
         }
 
         public SocketError ConnectAsync(byte[] socketAddress, int socketAddressLen, Action<SocketError> callback)
