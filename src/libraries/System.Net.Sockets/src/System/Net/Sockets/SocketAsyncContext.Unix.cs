@@ -1061,6 +1061,7 @@ namespace System.Net.Sockets
             // So, if that works, this code path ends up unused
             // But, it's doing cancellation registration dispose, so that's probably worth understanding more....
 
+            // Re cancellation registration, we really should see how the cancellation token is used in the caller... may be unnecessary at this point...
 
             // This is called on a thread pool thread when we think we are ready to process an operation.
             // It's invoked from the epoll thread queuing work to the thread pool.
@@ -1535,6 +1536,22 @@ namespace System.Net.Sockets
                 return true;
             }
 
+            private async ValueTask<bool> WaitForAsyncSignal()
+            {
+                Debug.Assert(_operation.CompletionSource is not null);
+
+                await _operation.CompletionSource.Task.ConfigureAwait(false);
+
+                // TODO: Cancellation handling here
+
+                // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
+                // TODO: Obviously this is suboptimal, not clear what's better
+
+                _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                return true;
+            }
+
             // False means cancellation (or timeout); error is in [socketError]
             public (bool retry, SocketError socketError) WaitForSyncRetry()
             {
@@ -1611,12 +1628,97 @@ namespace System.Net.Sockets
                 return (true, default);
             }
 
+            // TODO: This shares a lot of logic with the above sync routine, but
+            // I'll wait to simplify/unify it until I have a better sense of how the queue simplfication shakes out.
+
+            // TODO: Add a CancellationToken argument
+
+            // False means cancellation (or timeout); error is in [socketError]
+            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry()
+            {
+                bool cancelled;
+                bool retry;
+
+                if (!_isStarted)
+                {
+                    _isStarted = true;
+                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
+                    {
+                        return (true, default);
+                    }
+                }
+
+                if (!_isInQueue)
+                {
+                    // TODO: This doesn't make any sense for async operations,
+                    // but since it only acts when the socket is blocking, it shouldn't actually do any harm.
+                    SocketError errorCode;
+                    if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
+                    {
+                        return (false, errorCode);
+                    }
+
+                    // Allocate the TCS we will wait on
+                    _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        return (false, _operation.ErrorCode);
+                    }
+
+                    if (retry)
+                    {
+                        return (true, default);
+                    }
+
+                    _isInQueue = true;
+                }
+                else
+                {
+                    // We just tried to execute the queued operation, but it failed.
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        _operation.Event!.Dispose();
+                        return (false, _operation.ErrorCode);
+                    }
+
+                    if (retry)
+                    {
+                        return (true, default);
+                    }
+                }
+
+                if (!await WaitForAsyncSignal().ConfigureAwait(false))
+                {
+                    // Cancellation occurred
+                    return (false, _operation.ErrorCode);
+                }
+
+                // We've been signalled to try to process the operation.
+                (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
+                if (cancelled)
+                {
+                    return (false, _operation.ErrorCode);
+                }
+
+                return (true, default);
+            }
+
             public void Complete()
             {
                 if (_isInQueue)
                 {
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
                     _operation.Event!.Dispose();
+                    _operation.Event = null;
+                    _operation.CompletionSource = null;
+                }
+                else
+                {
+                    Debug.Assert(_operation.Event == null);
+                    Debug.Assert(_operation.CompletionSource == null);
                 }
             }
         }
