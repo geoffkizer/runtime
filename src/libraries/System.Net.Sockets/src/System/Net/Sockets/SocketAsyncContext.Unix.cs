@@ -1730,7 +1730,32 @@ namespace System.Net.Sockets
                 SocketAddressLen = socketAddressLen,
             };
 
-            PerformSyncOperation(ref _receiveQueue, operation, timeout, observedSequenceNumber);
+            // This is PerformSyncOperation
+            var state = new SyncOperationState(timeout, observedSequenceNumber);
+            try
+            {
+                operation.Event = state._waitEvent;
+
+                while (true)
+                {
+                    bool tryAgain = state.WaitForSyncRetry(ref _receiveQueue, operation);
+                    if (!tryAgain)
+                    {
+                        // Cancellation or timeout
+                        break;
+                    }
+
+                    if (operation.TryComplete(this))
+                    {
+                        state.Complete(ref _receiveQueue, operation);
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                state.Dispose();
+            }
 
             flags = operation.ReceivedFlags;
             bytesReceived = operation.BytesTransferred;
