@@ -1729,25 +1729,24 @@ namespace System.Net.Sockets
             Debug.Assert(socketAddressLen > 0, $"Unexpected socketAddressLen: {socketAddressLen}");
 
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteAccept(_socket, socketAddress, ref socketAddressLen, out acceptedFd, out errorCode))
+
+            var state = CreateReadOperationState(-1);
+            while (true)
             {
-                Debug.Assert(errorCode == SocketError.Success || acceptedFd == (IntPtr)(-1), $"Unexpected values: errorCode={errorCode}, acceptedFd={acceptedFd}");
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    acceptedFd = default;
+                    return errorCode;
+                }
+
+                if (SocketPal.TryCompleteAccept(_socket, socketAddress, ref socketAddressLen, out acceptedFd, out errorCode))
+                {
+                    state.Complete();
+                    return errorCode;
+                }
             }
-
-            var operation = new AcceptOperation(this)
-            {
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-            };
-
-            PerformSyncOperation(ref _receiveQueue, operation, -1, observedSequenceNumber);
-
-            socketAddressLen = operation.SocketAddressLen;
-            acceptedFd = operation.AcceptedFileDescriptor;
-            return operation.ErrorCode;
         }
 
         public SocketError AcceptAsync(byte[] socketAddress, ref int socketAddressLen, out IntPtr acceptedFd, Action<IntPtr, byte[], int, SocketError> callback)
