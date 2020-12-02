@@ -560,17 +560,6 @@ namespace System.Net.Sockets
             }
         }
 
-        private sealed unsafe class BufferPtrReceiveOperation : ReceiveOperation
-        {
-            public byte* BufferPtr;
-            public int Length;
-
-            public BufferPtrReceiveOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override bool DoTryComplete(SocketAsyncContext context) =>
-                SocketPal.TryCompleteReceiveFrom(context._socket, new Span<byte>(BufferPtr, Length), null, Flags, SocketAddress, ref SocketAddressLen, out BytesTransferred, out ReceivedFlags, out ErrorCode);
-        }
-
         private sealed class ReceiveMessageFromOperation : ReadOperation
         {
             public Memory<byte> Buffer;
@@ -1886,10 +1875,7 @@ namespace System.Net.Sockets
             return ReceiveFromAsync(buffer, flags, null, ref socketAddressLen, out bytesReceived, out receivedFlags, callback, cancellationToken);
         }
 
-        // TODO:
-        // It would be nice to encapsulate the observedSequenceNumber nonsense into SyncOperationState.
-        // Same with DumbSyncReceiveOperation.
-
+        // TODO: THis should just call below
         public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
             SocketError errorCode;
@@ -1912,37 +1898,29 @@ namespace System.Net.Sockets
                     return errorCode;
                 }
             }
-       }
+        }
 
         public unsafe SocketError ReceiveFrom(Span<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
-            SocketFlags receivedFlags;
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteReceiveFrom(_socket, buffer, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
-            {
-                flags = receivedFlags;
-                return errorCode;
-            }
 
-            fixed (byte* bufferPtr = &MemoryMarshal.GetReference(buffer))
+            var state = CreateReadOperationState(timeout);
+            while (true)
             {
-                var operation = new BufferPtrReceiveOperation(this)
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
                 {
-                    BufferPtr = bufferPtr,
-                    Length = buffer.Length,
-                    Flags = flags,
-                    SocketAddress = socketAddress,
-                    SocketAddressLen = socketAddressLen,
-                };
+                    bytesReceived = default;
+                    return errorCode;
+                }
 
-                PerformSyncOperation(ref _receiveQueue, operation, timeout, observedSequenceNumber);
-
-                flags = operation.ReceivedFlags;
-                bytesReceived = operation.BytesTransferred;
-                return operation.ErrorCode;
+                if (SocketPal.TryCompleteReceiveFrom(_socket, buffer, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                {
+                    state.Complete();
+                    flags = receivedFlags;
+                    return errorCode;
+                }
             }
         }
 
