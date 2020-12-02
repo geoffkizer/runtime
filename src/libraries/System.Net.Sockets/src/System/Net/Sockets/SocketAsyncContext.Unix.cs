@@ -1540,6 +1540,123 @@ namespace System.Net.Sockets
             }
         }
 
+        private struct SyncOperationState2<T> : IDisposable
+            where T : AsyncOperation2<T>
+        {
+            public ManualResetEventSlim _waitEvent;
+            public bool _isInQueue;
+            public int _timeout;
+            public int _observedSequenceNumber;
+
+            public SyncOperationState2(int timeout, int observedSequenceNumber)
+            {
+                Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+
+                _timeout = timeout;
+                _waitEvent = new ManualResetEventSlim(false, 0);
+                _isInQueue = false;
+                _observedSequenceNumber = observedSequenceNumber;
+            }
+
+            // TODO: COuld be merged below?
+            public bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                DateTime waitStart = DateTime.UtcNow;
+
+                if (!operation.Event!.Wait(_timeout))
+                {
+                    queue.CancelAndContinueProcessing(operation);
+                    operation.ErrorCode = SocketError.TimedOut;
+                    return false;
+                }
+
+                // Reset the event now to avoid lost notifications if the processing is unsuccessful.
+                operation.Event!.Reset();
+
+                // Adjust timeout for next attempt.
+                if (_timeout > 0)
+                {
+                    _timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                    if (_timeout <= 0)
+                    {
+                        queue.CancelAndContinueProcessing(operation);
+                        operation.ErrorCode = SocketError.TimedOut;
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            // False means cancellation (or timeout)
+            public bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                bool cancelled;
+                bool retry;
+                if (!_isInQueue)
+                {
+                    (cancelled, retry, _observedSequenceNumber) = queue.StartSyncOperation(operation.AssociatedContext, operation, _observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        return false;
+                    }
+
+                    if (retry)
+                    {
+                        return true;
+                    }
+
+                    _isInQueue = true;
+                }
+                else
+                {
+                    // We just tried to execute the queued operation, but it failed.
+                    (cancelled, retry, _observedSequenceNumber) = queue.PendQueuedOperation(operation, _observedSequenceNumber);
+                    if (cancelled)
+                    {
+                        return false;
+                    }
+
+                    if (retry)
+                    {
+                        return true;
+                    }
+                }
+
+                if (!WaitForSyncSignal(ref queue, operation))
+                {
+                    // Timeout occurred
+                    return false;
+                }
+
+                // We've been signalled to try to process the operation.
+                (cancelled, _observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                if (cancelled)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            public void Complete<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
+                where TOperation : AsyncOperation
+            {
+                if (_isInQueue)
+                {
+                    queue.CompleteQueuedOperation(operation);
+                }
+            }
+
+            public void Dispose()
+            {
+                _waitEvent.Dispose();
+            }
+        }
+
         private void PerformSyncOperation<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation, int timeout, int observedSequenceNumber)
             where TOperation : AsyncOperation
         {
@@ -1758,7 +1875,7 @@ namespace System.Net.Sockets
             var operation = new DumbSyncReceiveOperation(this);
 
             // This is PerformSyncOperation
-            var state = new SyncOperationState(timeout, observedSequenceNumber);
+            var state = new SyncOperationState2<ReadOperation>(timeout, observedSequenceNumber);
             try
             {
                 operation.Event = state._waitEvent;
