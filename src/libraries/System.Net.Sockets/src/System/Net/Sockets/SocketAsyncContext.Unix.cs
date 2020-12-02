@@ -8,6 +8,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace System.Net.Sockets
 {
@@ -132,6 +133,7 @@ namespace System.Net.Sockets
             public CancellationTokenRegistration CancellationRegistration;
 
             public ManualResetEventSlim? Event { get; set; }
+            public TaskCompletionSource? CompletionSource { get; set; }
 
             public AsyncOperation(SocketAsyncContext context)
             {
@@ -143,6 +145,7 @@ namespace System.Net.Sockets
             {
                 _state = (int)State.Waiting;
                 Event = null;
+                CompletionSource = null;
                 Next = this;
 #if DEBUG
                 _callbackQueued = 0;
@@ -244,6 +247,10 @@ namespace System.Net.Sockets
                 {
                     e.Set();
                 }
+                else if (CompletionSource is not null)
+                {
+                    CompletionSource.SetResult();
+                }
                 else
                 {
 #if DEBUG
@@ -271,6 +278,10 @@ namespace System.Net.Sockets
                     // Sync operation.  Signal waiting thread to continue processing.
                     e.Set();
                 }
+                else if (CompletionSource is not null)
+                {
+                    CompletionSource.SetResult();
+                }
                 else
                 {
                     // Async operation.
@@ -281,6 +292,7 @@ namespace System.Net.Sockets
             public void Schedule()
             {
                 Debug.Assert(Event == null);
+                Debug.Assert(CompletionSource is null);
 
                 // Async operation.  Process the IO on the threadpool.
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
@@ -518,6 +530,29 @@ namespace System.Net.Sockets
                 Debug.Assert(false);
             }
         }
+
+        // Goal:
+        // remove return value from DoTryComplete
+        // Make the caller call back to queue or whatever
+        // In other words, it should be more like a notification: "Hey, we've been signalled, please retry now"
+
+#if false
+        private sealed class DumbAsyncReceiveOperation : ReceiveOperation
+        {
+            public DumbAsyncReceiveOperation(SocketAsyncContext context) : base(context) { }
+
+            protected override bool DoTryComplete(SocketAsyncContext context)
+            {
+                Debug.Assert(false);
+                return true;
+            }
+
+            public override void InvokeCallback(bool allowPooling)
+            {
+                Debug.Assert(false);
+            }
+        }
+#endif
 
         private sealed class DumbSyncSendOperation : SendOperation
         {
@@ -998,6 +1033,11 @@ namespace System.Net.Sockets
                     e.Set();
                     return null;
                 }
+                else if (op.CompletionSource is not null)
+                {
+                    op.CompletionSource.SetResult();
+                    return null;
+                }
                 else
                 {
                     // Async operation.  The caller will figure out how to process the IO.
@@ -1011,6 +1051,19 @@ namespace System.Net.Sockets
                 }
             }
 
+            // Here's what I basically want to do.
+            // I want to do something similar to the sync logic I have now.
+            // Except, I want to make the wait asynchronous, via a TaskCompletionSource type of thing
+            // Don't worry about the expense for now...
+
+            // My plan is to invoke ops similarly to the sync path, but using a TCS
+            // and singalling that TCS in all the places where we signal the Event today
+            // So, if that works, this code path ends up unused
+            // But, it's doing cancellation registration dispose, so that's probably worth understanding more....
+
+
+            // This is called on a thread pool thread when we think we are ready to process an operation.
+            // It's invoked from the epoll thread queuing work to the thread pool.
             internal void ProcessAsyncOperation(TOperation op)
             {
                 OperationResult result = ProcessQueuedOperation(op);
@@ -1557,7 +1610,7 @@ namespace System.Net.Sockets
 
                 return (true, default);
             }
-            
+
             public void Complete()
             {
                 if (_isInQueue)
