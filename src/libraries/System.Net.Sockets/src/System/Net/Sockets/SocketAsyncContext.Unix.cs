@@ -1550,7 +1550,6 @@ namespace System.Net.Sockets
         private struct SyncOperationState2<T> : IDisposable
             where T : AsyncOperation2<T>
         {
-            public ManualResetEventSlim _waitEvent;
             private bool _isStarted;            // TODO: these should be combined into a single state? But I probably should look at stuff like StartSyncOperation in more detail
             public bool _isInQueue;
             public int _timeout;
@@ -1563,15 +1562,11 @@ namespace System.Net.Sockets
 
                 _timeout = timeout;
 
-                // TODO: allocation can be deferred until the initial attempt fails
-                _waitEvent = new ManualResetEventSlim(false, 0);
-
                 _isStarted = false;
                 _isInQueue = false;
                 _observedSequenceNumber = 0;
 
                 _operation = operation;
-                _operation.Event = _waitEvent;
             }
 
             // TODO: COuld be merged below?
@@ -1641,6 +1636,9 @@ namespace System.Net.Sockets
                     }
 
                     _isInQueue = true;
+
+                    // Allocate the event we will wait on
+                    _operation.Event = new ManualResetEventSlim(false, 0);
                 }
                 else
                 {
@@ -1648,6 +1646,7 @@ namespace System.Net.Sockets
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                     if (cancelled)
                     {
+                        _operation.Event!.Dispose();
                         return (false, _operation.ErrorCode);
                     }
 
@@ -1660,6 +1659,7 @@ namespace System.Net.Sockets
                 if (!WaitForSyncSignal())
                 {
                     // Timeout occurred
+                    _operation.Event!.Dispose();
                     return (false, _operation.ErrorCode);
                 }
 
@@ -1667,23 +1667,25 @@ namespace System.Net.Sockets
                 (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
+                    _operation.Event!.Dispose();
                     return (false, _operation.ErrorCode);
                 }
 
                 return (true, default);
             }
-
             public void Complete()
             {
                 if (_isInQueue)
                 {
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
+                    _operation.Event!.Dispose();
                 }
             }
 
+            // TODO: Remove IDIsposable
             public void Dispose()
             {
-                _waitEvent.Dispose();
+                //_waitEvent.Dispose();
             }
         }
 
