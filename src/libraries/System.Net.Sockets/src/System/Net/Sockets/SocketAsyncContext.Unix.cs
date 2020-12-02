@@ -249,7 +249,7 @@ namespace System.Net.Sockets
                 }
                 else if (CompletionSource is not null)
                 {
-                    CompletionSource.SetResult();
+                    CompletionSource.TrySetResult();
                 }
                 else
                 {
@@ -1035,7 +1035,7 @@ namespace System.Net.Sockets
                 }
                 else if (op.CompletionSource is not null)
                 {
-                    op.CompletionSource.SetResult();
+                    op.CompletionSource.TrySetResult();
                     return null;
                 }
                 else
@@ -1536,13 +1536,14 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            private async ValueTask<bool> WaitForAsyncSignal()
+            // Note this will throw on cancellation
+            private async ValueTask<bool> WaitForAsyncSignal(CancellationToken cancellationToken)
             {
                 Debug.Assert(_operation.CompletionSource is not null);
 
-                await _operation.CompletionSource.Task.ConfigureAwait(false);
+                using CancellationTokenRegistration registration = cancellationToken.Register(tcs => ((TaskCompletionSource)tcs!).TrySetCanceled(cancellationToken), _operation.CompletionSource);
 
-                // TODO: Cancellation handling here
+                await _operation.CompletionSource.Task.ConfigureAwait(false);
 
                 // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
                 // TODO: Obviously this is suboptimal, not clear what's better
@@ -1634,7 +1635,8 @@ namespace System.Net.Sockets
             // TODO: Add a CancellationToken argument
 
             // False means cancellation (or timeout); error is in [socketError]
-            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry()
+            // TODO: Clarify, does this throw on CT cancellation or return appropriate error?
+            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry(CancellationToken cancellationToken)
             {
                 bool cancelled;
                 bool retry;
@@ -1690,7 +1692,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (!await WaitForAsyncSignal().ConfigureAwait(false))
+                if (!await WaitForAsyncSignal(cancellationToken).ConfigureAwait(false))
                 {
                     // Cancellation occurred
                     return (false, _operation.ErrorCode);
