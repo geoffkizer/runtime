@@ -1606,7 +1606,7 @@ namespace System.Net.Sockets
             }
 
             // False means cancellation (or timeout)
-            public bool WaitForSyncRetry()
+            public (bool retry, SocketError socketError) WaitForSyncRetry()
             {
                 bool cancelled;
                 bool retry;
@@ -1616,7 +1616,7 @@ namespace System.Net.Sockets
                     _isStarted = true;
                     if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
                     {
-                        return true;
+                        return (true, default);
                     }
                 }
 
@@ -1626,19 +1626,18 @@ namespace System.Net.Sockets
                     SocketError errorCode;
                     if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                     {
-                        _operation.ErrorCode = errorCode;
-                        return false;
+                        return (false, errorCode);
                     }
 
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
                     if (cancelled)
                     {
-                        return false;
+                        return (false, _operation.ErrorCode);
                     }
 
                     if (retry)
                     {
-                        return true;
+                        return (true, default);
                     }
 
                     _isInQueue = true;
@@ -1649,29 +1648,29 @@ namespace System.Net.Sockets
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                     if (cancelled)
                     {
-                        return false;
+                        return (false, _operation.ErrorCode);
                     }
 
                     if (retry)
                     {
-                        return true;
+                        return (true, default);
                     }
                 }
 
                 if (!WaitForSyncSignal())
                 {
                     // Timeout occurred
-                    return false;
+                    return (false, _operation.ErrorCode);
                 }
 
                 // We've been signalled to try to process the operation.
                 (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
-                    return false;
+                    return (false, _operation.ErrorCode);
                 }
 
-                return true;
+                return (true, default);
             }
 
             public void Complete()
@@ -1681,8 +1680,6 @@ namespace System.Net.Sockets
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
                 }
             }
-
-            public SocketError SocketError => _operation.ErrorCode;
 
             public void Dispose()
             {
@@ -1892,21 +1889,21 @@ namespace System.Net.Sockets
         public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
             SocketError errorCode;
-            SocketFlags receivedFlags;
 
             var state = CreateReadOperationState(timeout);
             try
             {
                 while (true)
                 {
-                    bool tryAgain = state.WaitForSyncRetry();
-                    if (!tryAgain)
+                    bool retry;
+                    (retry, errorCode) = state.WaitForSyncRetry();
+                    if (!retry)
                     {
                         bytesReceived = default;
-                        return state.SocketError;
+                        return errorCode;
                     }
 
-                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
+                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
                     {
                         state.Complete();
                         flags = receivedFlags;
