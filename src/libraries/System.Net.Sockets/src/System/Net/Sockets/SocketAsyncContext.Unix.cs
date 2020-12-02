@@ -1749,7 +1749,8 @@ namespace System.Net.Sockets
                     if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
                     {
                         state.Complete(ref _receiveQueue, operation);
-                        break;
+                        flags = receivedFlags;
+                        return errorCode;
                     }
                 }
             }
@@ -1758,6 +1759,8 @@ namespace System.Net.Sockets
                 state.Dispose();
             }
 
+            // TODO: Note the results aren't on the operation anymore, so this seems unnecessary, except probably for the error code
+            // We are only going to hit this path on cancellation or some other failure, see above
             flags = operation.ReceivedFlags;
             bytesReceived = operation.BytesTransferred;
             return operation.ErrorCode;
