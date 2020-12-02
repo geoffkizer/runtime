@@ -1540,6 +1540,13 @@ namespace System.Net.Sockets
             }
         }
 
+        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout, int observedSequenceNumber)
+        {
+            // TODO: Cache operation
+
+            return new SyncOperationState2<ReadOperation>(timeout, observedSequenceNumber, new DumbSyncReceiveOperation(this));
+        }
+
         private struct SyncOperationState2<T> : IDisposable
             where T : AsyncOperation2<T>
         {
@@ -1549,7 +1556,7 @@ namespace System.Net.Sockets
             public int _observedSequenceNumber;
             private T _operation;
 
-            public SyncOperationState2(SocketAsyncContext context, int timeout, int observedSequenceNumber, T operation)
+            public SyncOperationState2(int timeout, int observedSequenceNumber, T operation)
             {
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
@@ -1559,6 +1566,7 @@ namespace System.Net.Sockets
                 _observedSequenceNumber = observedSequenceNumber;
 
                 _operation = operation;
+                _operation.Event = _waitEvent;
             }
 
             // TODO: COuld be merged below?
@@ -1650,6 +1658,8 @@ namespace System.Net.Sockets
                     _operation.OperationQueue.CompleteQueuedOperation(_operation);
                 }
             }
+
+            public SocketError SocketError => _operation.ErrorCode;
 
             public void Dispose()
             {
@@ -1871,15 +1881,10 @@ namespace System.Net.Sockets
                 return errorCode;
             }
 
-            // TODO: Pass event from SyncOperationState
-            var operation = new DumbSyncReceiveOperation(this);
-
             // This is PerformSyncOperation
-            var state = new SyncOperationState2<ReadOperation>(this, timeout, observedSequenceNumber, operation);
+            var state = CreateReadOperationState(timeout, observedSequenceNumber);
             try
             {
-                operation.Event = state._waitEvent;
-
                 while (true)
                 {
                     bool tryAgain = state.WaitForSyncRetry();
@@ -1904,11 +1909,11 @@ namespace System.Net.Sockets
 
             // TODO: Note the results aren't on the operation anymore, so this seems unnecessary, except probably for the error code
             // We are only going to hit this path on cancellation or some other failure, see above
-            Debug.Assert(operation.ErrorCode != SocketError.Success);
+            Debug.Assert(state.SocketError != SocketError.Success);
 
             flags = default;
             bytesReceived = default;
-            return operation.ErrorCode;
+            return state.SocketError;
         }
 
         public unsafe SocketError ReceiveFrom(Span<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
