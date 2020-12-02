@@ -1570,7 +1570,7 @@ namespace System.Net.Sockets
             }
 
             // TODO: COuld be merged below?
-            public bool WaitForSyncSignal()
+            private bool WaitForSyncSignal()
             {
                 DateTime waitStart = DateTime.UtcNow;
 
@@ -1624,21 +1624,23 @@ namespace System.Net.Sockets
                         return (false, errorCode);
                     }
 
+                    // Allocate the event we will wait on
+                    _operation.Event = new ManualResetEventSlim(false, 0);
+
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
                     if (cancelled)
                     {
+                        _operation.Event!.Dispose();
                         return (false, _operation.ErrorCode);
                     }
 
                     if (retry)
                     {
+                        _operation.Event!.Dispose();
                         return (true, default);
                     }
 
                     _isInQueue = true;
-
-                    // Allocate the event we will wait on
-                    _operation.Event = new ManualResetEventSlim(false, 0);
                 }
                 else
                 {
