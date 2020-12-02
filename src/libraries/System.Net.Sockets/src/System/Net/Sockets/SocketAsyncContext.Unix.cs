@@ -1745,7 +1745,8 @@ namespace System.Net.Sockets
                         break;
                     }
 
-                    if (operation.TryComplete(this))
+//                    if (operation.TryComplete(this))
+                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
                     {
                         state.Complete(ref _receiveQueue, operation);
                         break;
