@@ -1902,8 +1902,8 @@ namespace System.Net.Sockets
                     bool tryAgain = state.WaitForSyncRetry();
                     if (!tryAgain)
                     {
-                        // Cancellation or timeout
-                        break;
+                        bytesReceived = default;
+                        return state.SocketError;
                     }
 
                     if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
@@ -1918,15 +1918,7 @@ namespace System.Net.Sockets
             {
                 state.Dispose();
             }
-
-            // TODO: Note the results aren't on the operation anymore, so this seems unnecessary, except probably for the error code
-            // We are only going to hit this path on cancellation or some other failure, see above
-            Debug.Assert(state.SocketError != SocketError.Success);
-
-            flags = default;
-            bytesReceived = default;
-            return state.SocketError;
-        }
+       }
 
         public unsafe SocketError ReceiveFrom(Span<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
