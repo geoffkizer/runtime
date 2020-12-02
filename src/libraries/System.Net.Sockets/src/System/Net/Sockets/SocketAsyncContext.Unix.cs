@@ -1482,7 +1482,7 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            // False means cancellation (or timeout)
+            // False means cancellation (or timeout); error is in [socketError]
             public (bool retry, SocketError socketError) WaitForSyncRetry()
             {
                 bool cancelled;
@@ -1557,6 +1557,7 @@ namespace System.Net.Sockets
 
                 return (true, default);
             }
+            
             public void Complete()
             {
                 if (_isInQueue)
