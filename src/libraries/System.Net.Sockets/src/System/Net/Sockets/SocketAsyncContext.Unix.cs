@@ -435,20 +435,6 @@ namespace System.Net.Sockets
             }
         }
 
-        private sealed unsafe class BufferPtrSendOperation : SendOperation
-        {
-            public byte* BufferPtr;
-
-            public BufferPtrSendOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override bool DoTryComplete(SocketAsyncContext context)
-            {
-                int bufferIndex = 0;
-                int bufferLength = Offset + Count; // TryCompleteSendTo expects the entire buffer, which it then indexes into with the ref Offset and ref Count arguments
-                return SocketPal.TryCompleteSendTo(context._socket, new ReadOnlySpan<byte>(BufferPtr, bufferLength), null, ref bufferIndex, ref Offset, ref Count, Flags, SocketAddress, SocketAddressLen, ref BytesTransferred, out ErrorCode);
-            }
-        }
-
         private abstract class ReceiveOperation : ReadOperation
         {
             public SocketFlags Flags;
@@ -2145,36 +2131,25 @@ namespace System.Net.Sockets
 
         public unsafe SocketError SendTo(ReadOnlySpan<byte> buffer, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesSent)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
+            SocketError errorCode;
 
             bytesSent = 0;
-            SocketError errorCode;
             int bufferIndexIgnored = 0, offset = 0, count = buffer.Length;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteSendTo(_socket, buffer, null, ref bufferIndexIgnored, ref offset, ref count, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+            var state = CreateWriteOperationState(timeout);
+            while (true)
             {
-                return errorCode;
-            }
-
-            fixed (byte* bufferPtr = &MemoryMarshal.GetReference(buffer))
-            {
-                var operation = new BufferPtrSendOperation(this)
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
                 {
-                    BufferPtr = bufferPtr,
-                    Offset = offset,
-                    Count = count,
-                    Flags = flags,
-                    SocketAddress = socketAddress,
-                    SocketAddressLen = socketAddressLen,
-                    BytesTransferred = bytesSent
-                };
+                    return errorCode;
+                }
 
-                PerformSyncOperation(ref _sendQueue, operation, timeout, observedSequenceNumber);
-
-                bytesSent = operation.BytesTransferred;
-                return operation.ErrorCode;
+                if (SocketPal.TryCompleteSendTo(_socket, buffer, null, ref bufferIndexIgnored, ref offset, ref count, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return errorCode;
+                }
             }
         }
 
