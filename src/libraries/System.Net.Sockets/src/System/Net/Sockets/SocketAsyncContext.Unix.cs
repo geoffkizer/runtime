@@ -1540,30 +1540,35 @@ namespace System.Net.Sockets
             }
         }
 
-        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout, int observedSequenceNumber)
+        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout)
         {
-            // TODO: Cache operation
+            // TODO: Cache and/or defer operation
 
-            return new SyncOperationState2<ReadOperation>(timeout, observedSequenceNumber, new DumbSyncReceiveOperation(this));
+            return new SyncOperationState2<ReadOperation>(timeout, new DumbSyncReceiveOperation(this));
         }
 
         private struct SyncOperationState2<T> : IDisposable
             where T : AsyncOperation2<T>
         {
             public ManualResetEventSlim _waitEvent;
+            private bool _isStarted;            // TODO: these should be combined into a single state? But I probably should look at stuff like StartSyncOperation in more detail
             public bool _isInQueue;
             public int _timeout;
             public int _observedSequenceNumber;
             private T _operation;
 
-            public SyncOperationState2(int timeout, int observedSequenceNumber, T operation)
+            public SyncOperationState2(int timeout, T operation)
             {
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
                 _timeout = timeout;
+
+                // TODO: allocation can be deferred until the initial attempt fails
                 _waitEvent = new ManualResetEventSlim(false, 0);
+
+                _isStarted = false;
                 _isInQueue = false;
-                _observedSequenceNumber = observedSequenceNumber;
+                _observedSequenceNumber = 0;
 
                 _operation = operation;
                 _operation.Event = _waitEvent;
@@ -1605,8 +1610,26 @@ namespace System.Net.Sockets
             {
                 bool cancelled;
                 bool retry;
+
+                if (!_isStarted)
+                {
+                    _isStarted = true;
+                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
+                    {
+                        return true;
+                    }
+                }
+
                 if (!_isInQueue)
                 {
+                    // TODO: Look at this
+                    SocketError errorCode;
+                    if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
+                    {
+                        _operation.ErrorCode = errorCode;
+                        return false;
+                    }
+
                     (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
                     if (cancelled)
                     {
@@ -1868,21 +1891,10 @@ namespace System.Net.Sockets
 
         public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
-
-            SocketFlags receivedFlags;
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
-            {
-                flags = receivedFlags;
-                return errorCode;
-            }
+            SocketFlags receivedFlags;
 
-            // This is PerformSyncOperation
-            var state = CreateReadOperationState(timeout, observedSequenceNumber);
+            var state = CreateReadOperationState(timeout);
             try
             {
                 while (true)
