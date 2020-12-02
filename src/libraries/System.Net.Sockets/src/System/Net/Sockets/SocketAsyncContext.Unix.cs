@@ -332,20 +332,32 @@ namespace System.Net.Sockets
             }
         }
 
+        private abstract class AsyncOperation2<T> : AsyncOperation
+            where T : AsyncOperation
+        {
+            public AsyncOperation2(SocketAsyncContext context) : base(context) { }
+
+            public abstract ref OperationQueue<T> OperationQueue { get; }
+        }
+
         // These two abstract classes differentiate the operations that go in the
         // read queue vs the ones that go in the write queue.
-        private abstract class ReadOperation : AsyncOperation, IThreadPoolWorkItem
+        private abstract class ReadOperation : AsyncOperation2<ReadOperation>, IThreadPoolWorkItem
         {
             public ReadOperation(SocketAsyncContext context) : base(context) { }
 
             void IThreadPoolWorkItem.Execute() => AssociatedContext.ProcessAsyncReadOperation(this);
+
+            public sealed override ref OperationQueue<ReadOperation> OperationQueue => ref AssociatedContext._receiveQueue;
         }
 
-        private abstract class WriteOperation : AsyncOperation, IThreadPoolWorkItem
+        private abstract class WriteOperation : AsyncOperation2<WriteOperation>, IThreadPoolWorkItem
         {
             public WriteOperation(SocketAsyncContext context) : base(context) { }
 
             void IThreadPoolWorkItem.Execute() => AssociatedContext.ProcessAsyncWriteOperation(this);
+
+            public sealed override ref OperationQueue<WriteOperation> OperationQueue => ref AssociatedContext._sendQueue;
         }
 
         private abstract class SendOperation : WriteOperation
@@ -1722,6 +1734,10 @@ namespace System.Net.Sockets
             int socketAddressLen = 0;
             return ReceiveFromAsync(buffer, flags, null, ref socketAddressLen, out bytesReceived, out receivedFlags, callback, cancellationToken);
         }
+
+        // TODO:
+        // It would be nice to encapsulate the observedSequenceNumber nonsense into SyncOperationState.
+        // Same with DumbSyncReceiveOperation.
 
         public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
