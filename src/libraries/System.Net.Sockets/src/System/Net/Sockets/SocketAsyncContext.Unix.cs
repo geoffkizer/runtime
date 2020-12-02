@@ -1895,29 +1895,22 @@ namespace System.Net.Sockets
             SocketError errorCode;
 
             var state = CreateReadOperationState(timeout);
-            try
+            while (true)
             {
-                while (true)
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
                 {
-                    bool retry;
-                    (retry, errorCode) = state.WaitForSyncRetry();
-                    if (!retry)
-                    {
-                        bytesReceived = default;
-                        return errorCode;
-                    }
-
-                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
-                    {
-                        state.Complete();
-                        flags = receivedFlags;
-                        return errorCode;
-                    }
+                    bytesReceived = default;
+                    return errorCode;
                 }
-            }
-            finally
-            {
-                state.Dispose();
+
+                if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                {
+                    state.Complete();
+                    flags = receivedFlags;
+                    return errorCode;
+                }
             }
        }
 
