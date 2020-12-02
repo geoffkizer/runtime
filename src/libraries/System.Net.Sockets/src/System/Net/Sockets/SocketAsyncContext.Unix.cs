@@ -533,6 +533,22 @@ namespace System.Net.Sockets
             }
         }
 
+        private sealed class DumbSyncSendOperation : SendOperation
+        {
+            public DumbSyncSendOperation(SocketAsyncContext context) : base(context) { }
+
+            protected override bool DoTryComplete(SocketAsyncContext context)
+            {
+                Debug.Assert(false);
+                return true;
+            }
+
+            public override void InvokeCallback(bool allowPooling)
+            {
+                Debug.Assert(false);
+            }
+        }
+
         private sealed class BufferListReceiveOperation : ReceiveOperation
         {
             public IList<ArraySegment<byte>>? Buffers;
@@ -1536,6 +1552,13 @@ namespace System.Net.Sockets
             return new SyncOperationState2<ReadOperation>(timeout, new DumbSyncReceiveOperation(this));
         }
 
+        private SyncOperationState2<WriteOperation> CreateWriteOperationState(int timeout)
+        {
+            // TODO: Cache and/or defer operation
+
+            return new SyncOperationState2<WriteOperation>(timeout, new DumbSyncSendOperation(this));
+        }
+
         private struct SyncOperationState2<T>
             where T : AsyncOperation2<T>
         {
@@ -2117,33 +2140,7 @@ namespace System.Net.Sockets
 
         public SocketError SendTo(byte[] buffer, int offset, int count, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesSent)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
-
-            bytesSent = 0;
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteSendTo(_socket, buffer, ref offset, ref count, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
-            {
-                return errorCode;
-            }
-
-            var operation = new BufferMemorySendOperation(this)
-            {
-                Buffer = buffer,
-                Offset = offset,
-                Count = count,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-                BytesTransferred = bytesSent
-            };
-
-            PerformSyncOperation(ref _sendQueue, operation, timeout, observedSequenceNumber);
-
-            bytesSent = operation.BytesTransferred;
-            return operation.ErrorCode;
+            return SendTo(new ReadOnlySpan<byte>(buffer, offset, count), flags, socketAddress, socketAddressLen, timeout, out bytesSent);
         }
 
         public unsafe SocketError SendTo(ReadOnlySpan<byte> buffer, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, int timeout, out int bytesSent)
