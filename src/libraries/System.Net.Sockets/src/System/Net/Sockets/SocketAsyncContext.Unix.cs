@@ -1875,29 +1875,9 @@ namespace System.Net.Sockets
             return ReceiveFromAsync(buffer, flags, null, ref socketAddressLen, out bytesReceived, out receivedFlags, callback, cancellationToken);
         }
 
-        // TODO: THis should just call below
         public SocketError ReceiveFrom(Memory<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
         {
-            SocketError errorCode;
-
-            var state = CreateReadOperationState(timeout);
-            while (true)
-            {
-                bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
-                if (!retry)
-                {
-                    bytesReceived = default;
-                    return errorCode;
-                }
-
-                if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
-                {
-                    state.Complete();
-                    flags = receivedFlags;
-                    return errorCode;
-                }
-            }
+            return ReceiveFrom(buffer.Span, ref flags, socketAddress, ref socketAddressLen,  timeout, out bytesReceived);
         }
 
         public unsafe SocketError ReceiveFrom(Span<byte> buffer, ref SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, int timeout, out int bytesReceived)
