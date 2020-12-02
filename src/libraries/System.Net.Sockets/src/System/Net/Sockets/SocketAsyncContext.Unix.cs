@@ -505,6 +505,22 @@ namespace System.Net.Sockets
             }
         }
 
+        private sealed class DumbSyncReceiveOperation : ReceiveOperation
+        {
+            public DumbSyncReceiveOperation(SocketAsyncContext context) : base(context) { }
+
+            protected override bool DoTryComplete(SocketAsyncContext context)
+            {
+                Debug.Assert(false);
+                return true;
+            }
+
+            public override void InvokeCallback(bool allowPooling)
+            {
+                Debug.Assert(false);
+            }
+        }
+
         private sealed class BufferListReceiveOperation : ReceiveOperation
         {
             public IList<ArraySegment<byte>>? Buffers;
@@ -1722,6 +1738,8 @@ namespace System.Net.Sockets
                 return errorCode;
             }
 
+            var operation = new DumbSyncReceiveOperation(this);
+#if false
             var operation = new BufferMemoryReceiveOperation(this)
             {
                 Buffer = buffer,
@@ -1729,6 +1747,7 @@ namespace System.Net.Sockets
                 SocketAddress = socketAddress,
                 SocketAddressLen = socketAddressLen,
             };
+#endif
 
             // This is PerformSyncOperation
             var state = new SyncOperationState(timeout, observedSequenceNumber);
@@ -1761,6 +1780,7 @@ namespace System.Net.Sockets
 
             // TODO: Note the results aren't on the operation anymore, so this seems unnecessary, except probably for the error code
             // We are only going to hit this path on cancellation or some other failure, see above
+            Debug.Assert(operation.ErrorCode != SocketError.Success);
             flags = operation.ReceivedFlags;
             bytesReceived = operation.BytesTransferred;
             return operation.ErrorCode;
