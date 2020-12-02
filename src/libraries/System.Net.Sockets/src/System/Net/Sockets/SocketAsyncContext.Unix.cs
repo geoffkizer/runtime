@@ -1547,8 +1547,9 @@ namespace System.Net.Sockets
             public bool _isInQueue;
             public int _timeout;
             public int _observedSequenceNumber;
+            private T _operation;
 
-            public SyncOperationState2(int timeout, int observedSequenceNumber)
+            public SyncOperationState2(SocketAsyncContext context, int timeout, int observedSequenceNumber, T operation)
             {
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
@@ -1556,22 +1557,24 @@ namespace System.Net.Sockets
                 _waitEvent = new ManualResetEventSlim(false, 0);
                 _isInQueue = false;
                 _observedSequenceNumber = observedSequenceNumber;
+
+                _operation = operation;
             }
 
             // TODO: COuld be merged below?
-            public bool WaitForSyncSignal(T operation)
+            public bool WaitForSyncSignal()
             {
                 DateTime waitStart = DateTime.UtcNow;
 
-                if (!operation.Event!.Wait(_timeout))
+                if (!_operation.Event!.Wait(_timeout))
                 {
-                    operation.OperationQueue.CancelAndContinueProcessing(operation);
-                    operation.ErrorCode = SocketError.TimedOut;
+                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+                    _operation.ErrorCode = SocketError.TimedOut;
                     return false;
                 }
 
                 // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                operation.Event!.Reset();
+                _operation.Event!.Reset();
 
                 // Adjust timeout for next attempt.
                 if (_timeout > 0)
@@ -1580,8 +1583,8 @@ namespace System.Net.Sockets
 
                     if (_timeout <= 0)
                     {
-                        operation.OperationQueue.CancelAndContinueProcessing(operation);
-                        operation.ErrorCode = SocketError.TimedOut;
+                        _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+                        _operation.ErrorCode = SocketError.TimedOut;
                         return false;
                     }
                 }
@@ -1590,13 +1593,13 @@ namespace System.Net.Sockets
             }
 
             // False means cancellation (or timeout)
-            public bool WaitForSyncRetry(T operation)
+            public bool WaitForSyncRetry()
             {
                 bool cancelled;
                 bool retry;
                 if (!_isInQueue)
                 {
-                    (cancelled, retry, _observedSequenceNumber) = operation.OperationQueue.StartSyncOperation(operation.AssociatedContext, operation, _observedSequenceNumber);
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
                     if (cancelled)
                     {
                         return false;
@@ -1612,7 +1615,7 @@ namespace System.Net.Sockets
                 else
                 {
                     // We just tried to execute the queued operation, but it failed.
-                    (cancelled, retry, _observedSequenceNumber) = operation.OperationQueue.PendQueuedOperation(operation, _observedSequenceNumber);
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                     if (cancelled)
                     {
                         return false;
@@ -1624,14 +1627,14 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (!WaitForSyncSignal(operation))
+                if (!WaitForSyncSignal())
                 {
                     // Timeout occurred
                     return false;
                 }
 
                 // We've been signalled to try to process the operation.
-                (cancelled, _observedSequenceNumber) = operation.OperationQueue.GetQueuedOperationStatus(operation);
+                (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
                     return false;
@@ -1640,11 +1643,11 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Complete(T operation)
+            public void Complete()
             {
                 if (_isInQueue)
                 {
-                    operation.OperationQueue.CompleteQueuedOperation(operation);
+                    _operation.OperationQueue.CompleteQueuedOperation(_operation);
                 }
             }
 
@@ -1872,24 +1875,23 @@ namespace System.Net.Sockets
             var operation = new DumbSyncReceiveOperation(this);
 
             // This is PerformSyncOperation
-            var state = new SyncOperationState2<ReadOperation>(timeout, observedSequenceNumber);
+            var state = new SyncOperationState2<ReadOperation>(this, timeout, observedSequenceNumber, operation);
             try
             {
                 operation.Event = state._waitEvent;
 
                 while (true)
                 {
-                    bool tryAgain = state.WaitForSyncRetry(operation);
+                    bool tryAgain = state.WaitForSyncRetry();
                     if (!tryAgain)
                     {
                         // Cancellation or timeout
                         break;
                     }
 
-//                    if (operation.TryComplete(this))
                     if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
                     {
-                        state.Complete(operation);
+                        state.Complete();
                         flags = receivedFlags;
                         return errorCode;
                     }
