@@ -2046,37 +2046,27 @@ namespace System.Net.Sockets
         public SocketError ReceiveMessageFrom(
             Memory<byte> buffer, IList<ArraySegment<byte>>? buffers, ref SocketFlags flags, byte[] socketAddress, ref int socketAddressLen, bool isIPv4, bool isIPv6, int timeout, out IPPacketInformation ipPacketInformation, out int bytesReceived)
         {
-            Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
-
-            SocketFlags receivedFlags;
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                (SocketPal.TryCompleteReceiveMessageFrom(_socket, buffer.Span, buffers, flags, socketAddress, ref socketAddressLen, isIPv4, isIPv6, out bytesReceived, out receivedFlags, out ipPacketInformation, out errorCode) ||
-                !ShouldRetrySyncOperation(out errorCode)))
+
+            var state = CreateReadOperationState(timeout);
+            while (true)
             {
-                flags = receivedFlags;
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = state.WaitForSyncRetry();
+                if (!retry)
+                {
+                    bytesReceived = default;
+                    ipPacketInformation = default;
+                    return errorCode;
+                }
+
+                if (SocketPal.TryCompleteReceiveMessageFrom(_socket, buffer.Span, buffers, flags, socketAddress, ref socketAddressLen, isIPv4, isIPv6, out bytesReceived, out SocketFlags receivedFlags, out ipPacketInformation, out errorCode))
+                {
+                    state.Complete();
+                    flags = receivedFlags;
+                    return errorCode;
+                }
             }
-
-            var operation = new ReceiveMessageFromOperation(this)
-            {
-                Buffer = buffer,
-                Buffers = buffers,
-                Flags = flags,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen,
-                IsIPv4 = isIPv4,
-                IsIPv6 = isIPv6,
-            };
-
-            PerformSyncOperation(ref _receiveQueue, operation, timeout, observedSequenceNumber);
-
-            socketAddressLen = operation.SocketAddressLen;
-            flags = operation.ReceivedFlags;
-            ipPacketInformation = operation.IPPacketInformation;
-            bytesReceived = operation.BytesTransferred;
-            return operation.ErrorCode;
         }
 
         public SocketError ReceiveMessageFromAsync(Memory<byte> buffer, IList<ArraySegment<byte>>? buffers, SocketFlags flags, byte[] socketAddress, ref int socketAddressLen, bool isIPv4, bool isIPv6, out int bytesReceived, out SocketFlags receivedFlags, out IPPacketInformation ipPacketInformation, Action<int, byte[], int, SocketFlags, IPPacketInformation, SocketError> callback)
