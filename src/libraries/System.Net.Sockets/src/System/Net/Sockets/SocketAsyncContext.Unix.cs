@@ -1559,13 +1559,13 @@ namespace System.Net.Sockets
             }
 
             // TODO: COuld be merged below?
-            public bool WaitForSyncSignal(ref OperationQueue<T> queue, T operation)
+            public bool WaitForSyncSignal(T operation)
             {
                 DateTime waitStart = DateTime.UtcNow;
 
                 if (!operation.Event!.Wait(_timeout))
                 {
-                    queue.CancelAndContinueProcessing(operation);
+                    operation.OperationQueue.CancelAndContinueProcessing(operation);
                     operation.ErrorCode = SocketError.TimedOut;
                     return false;
                 }
@@ -1580,7 +1580,7 @@ namespace System.Net.Sockets
 
                     if (_timeout <= 0)
                     {
-                        queue.CancelAndContinueProcessing(operation);
+                        operation.OperationQueue.CancelAndContinueProcessing(operation);
                         operation.ErrorCode = SocketError.TimedOut;
                         return false;
                     }
@@ -1590,13 +1590,13 @@ namespace System.Net.Sockets
             }
 
             // False means cancellation (or timeout)
-            public bool WaitForSyncRetry(ref OperationQueue<T> queue, T operation)
+            public bool WaitForSyncRetry(T operation)
             {
                 bool cancelled;
                 bool retry;
                 if (!_isInQueue)
                 {
-                    (cancelled, retry, _observedSequenceNumber) = queue.StartSyncOperation(operation.AssociatedContext, operation, _observedSequenceNumber);
+                    (cancelled, retry, _observedSequenceNumber) = operation.OperationQueue.StartSyncOperation(operation.AssociatedContext, operation, _observedSequenceNumber);
                     if (cancelled)
                     {
                         return false;
@@ -1612,7 +1612,7 @@ namespace System.Net.Sockets
                 else
                 {
                     // We just tried to execute the queued operation, but it failed.
-                    (cancelled, retry, _observedSequenceNumber) = queue.PendQueuedOperation(operation, _observedSequenceNumber);
+                    (cancelled, retry, _observedSequenceNumber) = operation.OperationQueue.PendQueuedOperation(operation, _observedSequenceNumber);
                     if (cancelled)
                     {
                         return false;
@@ -1624,14 +1624,14 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (!WaitForSyncSignal(ref queue, operation))
+                if (!WaitForSyncSignal(operation))
                 {
                     // Timeout occurred
                     return false;
                 }
 
                 // We've been signalled to try to process the operation.
-                (cancelled, _observedSequenceNumber) = queue.GetQueuedOperationStatus(operation);
+                (cancelled, _observedSequenceNumber) = operation.OperationQueue.GetQueuedOperationStatus(operation);
                 if (cancelled)
                 {
                     return false;
@@ -1640,11 +1640,11 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Complete(ref OperationQueue<T> queue, T operation)
+            public void Complete(T operation)
             {
                 if (_isInQueue)
                 {
-                    queue.CompleteQueuedOperation(operation);
+                    operation.OperationQueue.CompleteQueuedOperation(operation);
                 }
             }
 
@@ -1879,7 +1879,7 @@ namespace System.Net.Sockets
 
                 while (true)
                 {
-                    bool tryAgain = state.WaitForSyncRetry(ref _receiveQueue, operation);
+                    bool tryAgain = state.WaitForSyncRetry(operation);
                     if (!tryAgain)
                     {
                         // Cancellation or timeout
@@ -1889,7 +1889,7 @@ namespace System.Net.Sockets
 //                    if (operation.TryComplete(this))
                     if (SocketPal.TryCompleteReceiveFrom(_socket, buffer.Span, flags, socketAddress, ref socketAddressLen, out bytesReceived, out receivedFlags, out errorCode))
                     {
-                        state.Complete(ref _receiveQueue, operation);
+                        state.Complete(operation);
                         flags = receivedFlags;
                         return errorCode;
                     }
