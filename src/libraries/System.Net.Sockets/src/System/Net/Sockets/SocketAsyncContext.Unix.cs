@@ -1559,8 +1559,7 @@ namespace System.Net.Sockets
             }
 
             // TODO: COuld be merged below?
-            public bool WaitForSyncSignal<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
-                where TOperation : AsyncOperation
+            public bool WaitForSyncSignal(ref OperationQueue<T> queue, T operation)
             {
                 DateTime waitStart = DateTime.UtcNow;
 
@@ -1591,8 +1590,7 @@ namespace System.Net.Sockets
             }
 
             // False means cancellation (or timeout)
-            public bool WaitForSyncRetry<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
-                where TOperation : AsyncOperation
+            public bool WaitForSyncRetry(ref OperationQueue<T> queue, T operation)
             {
                 bool cancelled;
                 bool retry;
@@ -1642,8 +1640,7 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Complete<TOperation>(ref OperationQueue<TOperation> queue, TOperation operation)
-                where TOperation : AsyncOperation
+            public void Complete(ref OperationQueue<T> queue, T operation)
             {
                 if (_isInQueue)
                 {
