@@ -1521,7 +1521,6 @@ namespace System.Net.Sockets
 
                 if (!_operation.Event!.Wait(_timeout))
                 {
-                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
                     _operation.ErrorCode = SocketError.TimedOut;
                     return false;
                 }
@@ -1536,7 +1535,6 @@ namespace System.Net.Sockets
 
                     if (_timeout <= 0)
                     {
-                        _operation.OperationQueue.CancelAndContinueProcessing(_operation);
                         _operation.ErrorCode = SocketError.TimedOut;
                         return false;
                     }
@@ -1545,17 +1543,18 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            // Note this will throw on cancellation
-            private async ValueTask<bool> WaitForAsyncSignal(CancellationToken cancellationToken)
+            // Note we don't handle cancellation here, for now at least.
+            // It will be handled by going through the AsyncOperation.TryCancel path.
+            // We probably want to revist this, but not yet.
+
+            private async ValueTask<bool> WaitForAsyncSignal()
             {
                 Debug.Assert(_operation.CompletionSource is not null);
-
-                using CancellationTokenRegistration registration = cancellationToken.Register(tcs => ((TaskCompletionSource)tcs!).TrySetCanceled(cancellationToken), _operation.CompletionSource);
 
                 await _operation.CompletionSource.Task.ConfigureAwait(false);
 
                 // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
-                // TODO: Obviously this is suboptimal, not clear what's better
+                // TODO: Obviously this is suboptimal, not clear what's better; revisit later
 
                 _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1622,7 +1621,9 @@ namespace System.Net.Sockets
 
                 if (!WaitForSyncSignal())
                 {
-                    // Timeout occurred
+                    // Timeout occurred. Error code is set.
+                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+
                     Cleanup();
                     return (false, _operation.ErrorCode);
                 }
@@ -1640,6 +1641,10 @@ namespace System.Net.Sockets
 
             // TODO: This shares a lot of logic with the above sync routine, but
             // I'll wait to simplify/unify it until I have a better sense of how the queue simplfication shakes out.
+
+            // TODO: This is calling StartSyncOperation below, does that matter? Not sure what the difference is here...
+            // I don't think this matters, as it's really just a modified version of StartAsyncOperation. COnsider.
+
 
             // TODO: Add a CancellationToken argument
 
@@ -1703,9 +1708,11 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (!await WaitForAsyncSignal(cancellationToken).ConfigureAwait(false))
+                if (!await WaitForAsyncSignal().ConfigureAwait(false))
                 {
-                    // Cancellation occurred
+                    // Cancellation occurred. Error code is set.
+                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+
                     Cleanup();
                     return (false, _operation.ErrorCode);
                 }
