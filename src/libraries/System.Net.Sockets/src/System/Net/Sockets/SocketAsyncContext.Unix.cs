@@ -515,6 +515,8 @@ namespace System.Net.Sockets
             }
         }
 
+        // Note, these aren't specific to sync anymore. Basically just dummy operations.
+
         private sealed class DumbSyncReceiveOperation : ReceiveOperation
         {
             public DumbSyncReceiveOperation(SocketAsyncContext context) : base(context) { }
@@ -530,29 +532,6 @@ namespace System.Net.Sockets
                 Debug.Assert(false);
             }
         }
-
-        // Goal:
-        // remove return value from DoTryComplete
-        // Make the caller call back to queue or whatever
-        // In other words, it should be more like a notification: "Hey, we've been signalled, please retry now"
-
-#if false
-        private sealed class DumbAsyncReceiveOperation : ReceiveOperation
-        {
-            public DumbAsyncReceiveOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override bool DoTryComplete(SocketAsyncContext context)
-            {
-                Debug.Assert(false);
-                return true;
-            }
-
-            public override void InvokeCallback(bool allowPooling)
-            {
-                Debug.Assert(false);
-            }
-        }
-#endif
 
         private sealed class DumbSyncSendOperation : SendOperation
         {
@@ -1478,19 +1457,21 @@ namespace System.Net.Sockets
             }
         }
 
-        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout)
+        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout = -1)
         {
             // TODO: Cache and/or defer operation
 
             return new SyncOperationState2<ReadOperation>(timeout, new DumbSyncReceiveOperation(this));
         }
 
-        private SyncOperationState2<WriteOperation> CreateWriteOperationState(int timeout)
+        private SyncOperationState2<WriteOperation> CreateWriteOperationState(int timeout = -1)
         {
             // TODO: Cache and/or defer operation
 
             return new SyncOperationState2<WriteOperation>(timeout, new DumbSyncSendOperation(this));
         }
+
+        // Note, this isn;t sync-specific anymore
 
         private struct SyncOperationState2<T>
             where T : AsyncOperation2<T>
