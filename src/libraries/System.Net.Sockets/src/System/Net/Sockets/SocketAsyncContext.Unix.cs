@@ -1664,7 +1664,6 @@ namespace System.Net.Sockets
 
                 try
                 {
-                    
                     if (!_isStarted)
                     {
                         _isStarted = true;
@@ -1740,6 +1739,7 @@ namespace System.Net.Sockets
                 catch (Exception e)
                 {
                     Debug.Fail($"Unexpected exception in WaitForAsyncRetry: {e}");
+                    throw;
                 }
             }
 
