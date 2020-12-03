@@ -1660,77 +1660,87 @@ namespace System.Net.Sockets
                 bool cancelled;
                 bool retry;
 
-                if (!_isStarted)
-                {
-                    _isStarted = true;
-                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
-                    {
-                        return (true, default);
-                    }
-                }
+                // temporary -- should be unnecessary, revisit later
 
-                if (!_isInQueue)
+                try
                 {
-                    // TODO: This doesn't make any sense for async operations,
-                    // but since it only acts when the socket is blocking, it shouldn't actually do any harm.
-                    SocketError errorCode;
-                    if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
+                    
+                    if (!_isStarted)
                     {
-                        return (false, errorCode);
+                        _isStarted = true;
+                        if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
+                        {
+                            return (true, default);
+                        }
                     }
 
-                    // Allocate the TCS we will wait on
-                    _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    if (!_isInQueue)
+                    {
+                        // TODO: This doesn't make any sense for async operations,
+                        // but since it only acts when the socket is blocking, it shouldn't actually do any harm.
+                        SocketError errorCode;
+                        if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
+                        {
+                            return (false, errorCode);
+                        }
 
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, _cancellationToken);
+                        // Allocate the TCS we will wait on
+                        _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                        (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, _cancellationToken);
+                        if (cancelled)
+                        {
+                            Cleanup();
+                            return (false, _operation.ErrorCode);
+                        }
+
+                        if (retry)
+                        {
+                            Cleanup();
+                            return (true, default);
+                        }
+
+                        _isInQueue = true;
+                    }
+                    else
+                    {
+                        // We just tried to execute the queued operation, but it failed.
+                        (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
+                        if (cancelled)
+                        {
+                            Cleanup();
+                            return (false, _operation.ErrorCode);
+                        }
+
+                        if (retry)
+                        {
+                            return (true, default);
+                        }
+                    }
+
+                    if (!await WaitForAsyncSignal().ConfigureAwait(false))
+                    {
+                        // Cancellation occurred. Error code is set.
+                        _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+
+                        Cleanup();
+                        return (false, _operation.ErrorCode);
+                    }
+
+                    // We've been signalled to try to process the operation.
+                    (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                     if (cancelled)
                     {
                         Cleanup();
                         return (false, _operation.ErrorCode);
                     }
 
-                    if (retry)
-                    {
-                        Cleanup();
-                        return (true, default);
-                    }
-
-                    _isInQueue = true;
+                    return (true, default);
                 }
-                else
+                catch (Exception e)
                 {
-                    // We just tried to execute the queued operation, but it failed.
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
-                    if (cancelled)
-                    {
-                        Cleanup();
-                        return (false, _operation.ErrorCode);
-                    }
-
-                    if (retry)
-                    {
-                        return (true, default);
-                    }
+                    Debug.Fail($"Unexpected exception in WaitForAsyncRetry: {e}");
                 }
-
-                if (!await WaitForAsyncSignal().ConfigureAwait(false))
-                {
-                    // Cancellation occurred. Error code is set.
-                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
-
-                    Cleanup();
-                    return (false, _operation.ErrorCode);
-                }
-
-                // We've been signalled to try to process the operation.
-                (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
-                if (cancelled)
-                {
-                    Cleanup();
-                    return (false, _operation.ErrorCode);
-                }
-
-                return (true, default);
             }
 
             public void Complete()
