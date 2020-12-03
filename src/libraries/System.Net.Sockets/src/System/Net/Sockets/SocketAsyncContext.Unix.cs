@@ -10,6 +10,9 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+// Disable warning about accesing ValueTask directly
+#pragma warning disable CA2012
+
 namespace System.Net.Sockets
 {
     // Note on asynchronous behavior here:
@@ -1053,6 +1056,11 @@ namespace System.Net.Sockets
 
             // This is called on a thread pool thread when we think we are ready to process an operation.
             // It's invoked from the epoll thread queuing work to the thread pool.
+
+            /// NOTE:
+            // Eventually this code shouldn't be invoked anymore, because the TCS logic will supersede it.
+            // However, let's at least keep it around for now as it's instructive, if nothing else.
+
             internal void ProcessAsyncOperation(TOperation op)
             {
                 OperationResult result = ProcessQueuedOperation(op);
@@ -1457,18 +1465,32 @@ namespace System.Net.Sockets
             }
         }
 
-        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout = -1)
+        private SyncOperationState2<ReadOperation> CreateReadOperationState(int timeout)
         {
             // TODO: Cache and/or defer operation
 
-            return new SyncOperationState2<ReadOperation>(timeout, new DumbSyncReceiveOperation(this));
+            return new SyncOperationState2<ReadOperation>(new DumbSyncReceiveOperation(this), timeout: timeout);
         }
 
-        private SyncOperationState2<WriteOperation> CreateWriteOperationState(int timeout = -1)
+        private SyncOperationState2<WriteOperation> CreateWriteOperationState(int timeout)
         {
             // TODO: Cache and/or defer operation
 
-            return new SyncOperationState2<WriteOperation>(timeout, new DumbSyncSendOperation(this));
+            return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), timeout: timeout);
+        }
+
+        private SyncOperationState2<ReadOperation> CreateAsyncReadOperationState(CancellationToken cancellationToken)
+        {
+            // TODO: Cache and/or defer operation
+
+            return new SyncOperationState2<ReadOperation>(new DumbSyncReceiveOperation(this), cancellationToken: cancellationToken);
+        }
+
+        private SyncOperationState2<WriteOperation> CreateAsyncWriteOperationState(CancellationToken cancellationToken)
+        {
+            // TODO: Cache and/or defer operation
+
+            return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
         // Note, this isn;t sync-specific anymore
@@ -1477,16 +1499,18 @@ namespace System.Net.Sockets
             where T : AsyncOperation2<T>
         {
             private bool _isStarted;            // TODO: these should be combined into a single state? But I probably should look at stuff like StartSyncOperation in more detail
-            public bool _isInQueue;
-            public int _timeout;
-            public int _observedSequenceNumber;
+            private bool _isInQueue;
+            private int _timeout;
+            private CancellationToken _cancellationToken;
+            private int _observedSequenceNumber;
             private T _operation;
 
-            public SyncOperationState2(int timeout, T operation)
+            public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
             {
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
                 _timeout = timeout;
+                _cancellationToken = cancellationToken;
 
                 _isStarted = false;
                 _isInQueue = false;
@@ -1631,7 +1655,7 @@ namespace System.Net.Sockets
 
             // False means cancellation (or timeout); error is in [socketError]
             // TODO: Clarify, does this throw on CT cancellation or return appropriate error?
-            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry(CancellationToken cancellationToken)
+            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry()
             {
                 bool cancelled;
                 bool retry;
@@ -1658,7 +1682,7 @@ namespace System.Net.Sockets
                     // Allocate the TCS we will wait on
                     _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, cancellationToken);
+                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, _cancellationToken);
                     if (cancelled)
                     {
                         Cleanup();
@@ -1726,9 +1750,9 @@ namespace System.Net.Sockets
 
                 _operation.CompletionSource = null;
 
-                // TODO: unregister the cancellation token
+                // Note: this used to happen in ProcessAsyncOperation, but this seems like the appropriate place to do it now.
 
-                _operation.CancellationRegistration.Unregister();
+                _operation.CancellationRegistration.Dispose();
             }
         }
 
@@ -1930,37 +1954,56 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError ReceiveAsync(Memory<byte> buffer, SocketFlags flags, out int bytesReceived, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
+        // TODO: Cancellation needs to get passed in here somwhere...
+        private async ValueTask<(SocketError socketError, int bytesReceived)> InternalReceiveAsync(Memory<byte> buffer, SocketFlags flags, CancellationToken cancellationToken)
         {
             SetNonBlocking();
 
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteReceive(_socket, buffer.Span, flags, out bytesReceived, out errorCode))
+
+            var state = CreateAsyncReadOperationState(cancellationToken);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode) = await state.WaitForAsyncRetry().ConfigureAwait(false);
+                if (!retry)
+                {
+                    return (errorCode, default);
+                }
+
+                int bytesReceived;
+                if (SocketPal.TryCompleteReceive(_socket, buffer.Span, flags, out bytesReceived, out errorCode))
+                {
+                    state.Complete();
+                    return (errorCode, bytesReceived);
+                }
             }
+        }
 
-            BufferMemoryReceiveOperation operation = RentBufferMemoryReceiveOperation();
-            operation.SetReceivedFlags = false;
-            operation.Callback = callback;
-            operation.Buffer = buffer;
-            operation.Flags = flags;
-            operation.SocketAddress = null;
-            operation.SocketAddressLen = 0;
+        public SocketError ReceiveAsync(Memory<byte> buffer, SocketFlags flags, out int bytesReceived, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
+        {
+            ValueTask<(SocketError socketError, int bytesReceived)> vt = InternalReceiveAsync(buffer, flags, cancellationToken);
+            bool completedSynchronously = vt.IsCompleted;
 
-            if (!_receiveQueue.StartAsyncOperation(this, operation, observedSequenceNumber, cancellationToken))
+            if (completedSynchronously)
             {
-                bytesReceived = operation.BytesTransferred;
-                errorCode = operation.ErrorCode;
-
-                ReturnOperation(operation);
-                return errorCode;
+                SocketError socketError;
+                (socketError, bytesReceived) = vt.GetAwaiter().GetResult();
+                return socketError;
             }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    SocketError socketError;
+                    int bytesReceived;
+                    (socketError, bytesReceived) = vt.GetAwaiter().GetResult();
+                    callback(bytesReceived, null, 0, SocketFlags.None, socketError);
+                });
 
-            bytesReceived = 0;
-            return SocketError.IOPending;
+                bytesReceived = default;
+                return SocketError.IOPending;
+            }
         }
 
         public SocketError ReceiveFromAsync(Memory<byte> buffer, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesReceived, out SocketFlags receivedFlags, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
