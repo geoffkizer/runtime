@@ -1502,6 +1502,11 @@ namespace System.Net.Sockets
             return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
+        // TODO: SImilar for write
+        private static ValueTask<(bool, SocketError, SyncOperationState2<ReadOperation>)> WaitForReadAsyncRetry(SyncOperationState2<ReadOperation> state) =>
+            SyncOperationState2<ReadOperation>.WaitForAsyncRetry(state);
+
+
         //private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
         private const bool TraceEnabled = true;
 
@@ -1575,18 +1580,18 @@ namespace System.Net.Sockets
             // It will be handled by going through the AsyncOperation.TryCancel path.
             // We probably want to revist this, but not yet.
 
-            private async ValueTask<bool> WaitForAsyncSignal()
+            private static async ValueTask<(bool, SyncOperationState2<T>)> WaitForAsyncSignal(SyncOperationState2<T> state)
             {
-                Debug.Assert(_operation.CompletionSource is not null);
+                Debug.Assert(state._operation.CompletionSource is not null);
 
-                await _operation.CompletionSource.Task.ConfigureAwait(false);
+                await state._operation.CompletionSource.Task.ConfigureAwait(false);
 
                 // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
                 // TODO: Obviously this is suboptimal, not clear what's better; revisit later
 
-                _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                state._operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                return true;
+                return (true, state);
             }
 
             // False means cancellation (or timeout); error is in [socketError]
@@ -1678,7 +1683,10 @@ namespace System.Net.Sockets
 
             // False means cancellation (or timeout); error is in [socketError]
             // TODO: Clarify, does this throw on CT cancellation or return appropriate error?
-            public async ValueTask<(bool retry, SocketError socketError)> WaitForAsyncRetry()
+
+            // NOTE: This needs to be static because this is a struct.
+
+            public static async ValueTask<(bool retry, SocketError socketError, SyncOperationState2<T> state)> WaitForAsyncRetry(SyncOperationState2<T> state)
             {
                 bool cancelled;
                 bool retry;
@@ -1689,91 +1697,94 @@ namespace System.Net.Sockets
 
                 try
                 {
-                    if (!_isStarted)
+                    if (!state._isStarted)
                     {
-                        _isStarted = true;
-                        if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
+                        state._isStarted = true;
+                        if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext, out state._observedSequenceNumber))
                         {
                             Print($"--- WaitForAsyncRetry: IsReady == true, return true");
-                            return (true, default);
+                            return (true, default, state);
                         }
                     }
 
-                    if (!_isInQueue)
+                    if (!state._isInQueue)
                     {
                         // TODO: This doesn't make any sense for async operations,
                         // but since it only acts when the socket is blocking, it shouldn't actually do any harm.
                         SocketError errorCode;
-                        if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
+                        if (!state._operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                         {
-                            return (false, errorCode);
+                            return (false, errorCode, state);
                         }
 
                         // Allocate the TCS we will wait on
-                        _operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        state._operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, _cancellationToken);
+                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber, state._cancellationToken);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
 
-                            Cleanup();
-                            return (false, _operation.ErrorCode);
+                            state.Cleanup();
+                            return (false, state._operation.ErrorCode, state);
                         }
 
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
 
-                            return (true, default);
+                            return (true, default, state);
                         }
 
-                        _isInQueue = true;
+                        state._isInQueue = true;
                     }
                     else
                     {
                         // We just tried to execute the queued operation, but it failed.
-                        (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
+                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.PendQueuedOperation(state._operation, state._observedSequenceNumber);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned cancelled, return false");
 
-                            Cleanup();
-                            return (false, _operation.ErrorCode);
+                            state.Cleanup();
+                            return (false, state._operation.ErrorCode, state);
                         }
 
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned retry, return true");
 
-                            return (true, default);
+                            return (true, default, state);
                         }
                     }
 
-                    if (!await WaitForAsyncSignal().ConfigureAwait(false))
+                    bool success;
+                    (success, state) = await WaitForAsyncSignal(state).ConfigureAwait(false);
+
+                    if (!success)
                     {
                         Print($"--- WaitForAsyncRetry: WaitForAsyncSignal returned false; cancel and return false");
 
                         // Cancellation occurred. Error code is set.
-                        _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+                        state._operation.OperationQueue.CancelAndContinueProcessing(state._operation);
 
-                        Cleanup();
-                        return (false, _operation.ErrorCode);
+                        state.Cleanup();
+                        return (false, state._operation.ErrorCode, state);
                     }
 
                     // We've been signalled to try to process the operation.
-                    (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
+                    (cancelled, state._observedSequenceNumber) = state._operation.OperationQueue.GetQueuedOperationStatus(state._operation);
                     if (cancelled)
                     {
                         Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
 
-                        Cleanup();
-                        return (false, _operation.ErrorCode);
+                        state.Cleanup();
+                        return (false, state._operation.ErrorCode, state);
                     }
 
                     Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
 
-                    return (true, default);
+                    return (true, default, state);
                 }
                 catch (Exception e)
                 {
@@ -2014,7 +2025,8 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = await state.WaitForAsyncRetry().ConfigureAwait(false);
+                // TODO: Make helper for this
+                (retry, errorCode, state) = await WaitForReadAsyncRetry(state).ConfigureAwait(false);
                 if (!retry)
                 {
                     return (errorCode, default);
