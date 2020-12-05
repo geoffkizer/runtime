@@ -1502,6 +1502,10 @@ namespace System.Net.Sockets
             return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
+        [System.Runtime.InteropServices.DllImport("libc")] private static extern int printf(string format, string arg);
+
+        private static void Print(string s) => printf("%s\r\n", s);
+
         // Note, this isn;t sync-specific anymore
 
         private struct SyncOperationState2<T>
@@ -1671,6 +1675,8 @@ namespace System.Net.Sockets
 
                 // temporary -- should be unnecessary, revisit later
 
+                Print($"--- Enter WaitForAsyncRetry");
+
                 try
                 {
                     if (!_isStarted)
@@ -1678,6 +1684,7 @@ namespace System.Net.Sockets
                         _isStarted = true;
                         if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
                         {
+                            Print($"--- WaitForAsyncRetry: IsReady == true, return true");
                             return (true, default);
                         }
                     }
@@ -1698,13 +1705,16 @@ namespace System.Net.Sockets
                         (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber, _cancellationToken);
                         if (cancelled)
                         {
+                            Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
+
                             Cleanup();
                             return (false, _operation.ErrorCode);
                         }
 
                         if (retry)
                         {
-                            Cleanup();
+                            Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
+
                             return (true, default);
                         }
 
@@ -1716,18 +1726,24 @@ namespace System.Net.Sockets
                         (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
                         if (cancelled)
                         {
+                            Print($"--- WaitForAsyncRetry: PendQueuedOperation returned cancelled, return false");
+
                             Cleanup();
                             return (false, _operation.ErrorCode);
                         }
 
                         if (retry)
                         {
+                            Print($"--- WaitForAsyncRetry: PendQueuedOperation returned retry, return true");
+
                             return (true, default);
                         }
                     }
 
                     if (!await WaitForAsyncSignal().ConfigureAwait(false))
                     {
+                        Print($"--- WaitForAsyncRetry: WaitForAsyncSignal returned false; cancel and return false");
+
                         // Cancellation occurred. Error code is set.
                         _operation.OperationQueue.CancelAndContinueProcessing(_operation);
 
@@ -1739,9 +1755,13 @@ namespace System.Net.Sockets
                     (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                     if (cancelled)
                     {
+                        Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
+
                         Cleanup();
                         return (false, _operation.ErrorCode);
                     }
+
+                    Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
 
                     return (true, default);
                 }
