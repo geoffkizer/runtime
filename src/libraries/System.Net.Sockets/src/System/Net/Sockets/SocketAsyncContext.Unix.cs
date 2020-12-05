@@ -976,7 +976,7 @@ namespace System.Net.Sockets
 //                Debug.Assert(!processAsyncEvents);
 
                 // Hack. This is a change in behavior but I think it's correct.
-                processAsyncEvents = false;
+//                processAsyncEvents = false;
 
                 AsyncOperation op;
                 using (Lock())
