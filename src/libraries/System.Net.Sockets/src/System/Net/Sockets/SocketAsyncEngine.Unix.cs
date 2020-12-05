@@ -315,11 +315,13 @@ namespace System.Net.Sockets
                     {
                         SocketAsyncContext context = contextWrapper.Context;
 
+#if false
                         if (context.PreferInlineCompletions)
                         {
                             context.HandleEventsInline(socketEvent.Events);
                         }
                         else
+#endif
                         {
                             Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
 
