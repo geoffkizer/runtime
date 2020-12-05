@@ -283,7 +283,7 @@ namespace System.Net.Sockets
                 }
                 else if (CompletionSource is not null)
                 {
-                    CompletionSource.SetResult();
+                    CompletionSource.TrySetResult();
                 }
                 else
                 {
@@ -2005,6 +2005,8 @@ namespace System.Net.Sockets
             {
                 vt.GetAwaiter().UnsafeOnCompleted(() =>
                 {
+                    Debug.Assert(vt.IsCompleted);
+
                     SocketError socketError;
                     int bytesReceived;
                     (socketError, bytesReceived) = vt.GetAwaiter().GetResult();
