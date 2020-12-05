@@ -1508,7 +1508,7 @@ namespace System.Net.Sockets
 
 
         //private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
-        private const bool TraceEnabled = true;
+        private const bool TraceEnabled = false;
 
         [System.Runtime.InteropServices.DllImport("libc")] private static extern int printf(string format, string arg);
 
