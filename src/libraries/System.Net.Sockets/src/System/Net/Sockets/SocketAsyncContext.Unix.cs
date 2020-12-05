@@ -1973,7 +1973,7 @@ namespace System.Net.Sockets
             }
         }
 
-#if false   // New async path, not working...
+#if true// New async path, not working...
         private async ValueTask<(SocketError socketError, int bytesReceived)> InternalReceiveAsync(Memory<byte> buffer, SocketFlags flags, CancellationToken cancellationToken)
         {
             SetNonBlocking();
@@ -2026,7 +2026,7 @@ namespace System.Net.Sockets
                 return SocketError.IOPending;
             }
         }
-#endif
+#else
 
         public SocketError ReceiveAsync(Memory<byte> buffer, SocketFlags flags, out int bytesReceived, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
         {
@@ -2060,6 +2060,8 @@ namespace System.Net.Sockets
             bytesReceived = 0;
             return SocketError.IOPending;
         }
+#endif
+
         public SocketError ReceiveFromAsync(Memory<byte> buffer, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesReceived, out SocketFlags receivedFlags, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
         {
             SetNonBlocking();
