@@ -246,13 +246,14 @@ namespace System.Net.Sockets
                 DoAbort();
 
                 ManualResetEventSlim? e = Event;
+                TaskCompletionSource? tcs = CompletionSource;
                 if (e != null)
                 {
                     e.Set();
                 }
-                else if (CompletionSource is not null)
+                else if (tcs is not null)
                 {
-                    CompletionSource.TrySetResult();
+                    tcs.TrySetResult();
                 }
                 else
                 {
@@ -276,14 +277,15 @@ namespace System.Net.Sockets
             public void Dispatch()
             {
                 ManualResetEventSlim? e = Event;
+                TaskCompletionSource? tcs = CompletionSource;
                 if (e != null)
                 {
                     // Sync operation.  Signal waiting thread to continue processing.
                     e.Set();
                 }
-                else if (CompletionSource is not null)
+                else if (tcs is not null)
                 {
-                    CompletionSource.TrySetResult();
+                    tcs.TrySetResult();
                 }
                 else
                 {
@@ -1023,15 +1025,16 @@ namespace System.Net.Sockets
                 }
 
                 ManualResetEventSlim? e = op.Event;
+                TaskCompletionSource? tcs = op.CompletionSource;
                 if (e != null)
                 {
                     // Sync operation.  Signal waiting thread to continue processing.
                     e.Set();
                     return null;
                 }
-                else if (op.CompletionSource is not null)
+                else if (tcs is not null)
                 {
-                    op.CompletionSource.TrySetResult();
+                    tcs.TrySetResult();
                     return null;
                 }
                 else
@@ -1071,6 +1074,7 @@ namespace System.Net.Sockets
                 OperationResult result = ProcessQueuedOperation(op);
 
                 Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
+                Debug.Assert(op.CompletionSource == null, "CompletionSource not null in ProcessAsyncOperation")
 
                 if (result == OperationResult.Completed)
                 {
@@ -1256,7 +1260,7 @@ namespace System.Net.Sockets
             public void CancelAndContinueProcessing(TOperation op)
             {
                 // Note, only sync operations use this method.
-                Debug.Assert(op.Event != null);
+                Debug.Assert(op.Event != null || op.CompletionSource is not null);
 
                 // Remove operation from queue.
                 // Note it must be there since it can only be processed and removed by the caller.
