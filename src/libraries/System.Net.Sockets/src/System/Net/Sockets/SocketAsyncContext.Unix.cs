@@ -977,7 +977,7 @@ namespace System.Net.Sockets
 
                 // Hack. This is a change in behavior but I think it's correct.
                 processAsyncEvents = false;
-                
+
                 AsyncOperation op;
                 using (Lock())
                 {
