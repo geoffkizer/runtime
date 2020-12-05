@@ -2426,6 +2426,7 @@ namespace System.Net.Sockets
             return SocketError.IOPending;
         }
 
+#if false
         // Called on the epoll thread, speculatively tries to process synchronous events and errors for synchronous events, and
         // returns any remaining events that remain to be processed. Taking a lock for each operation queue to deterministically
         // handle synchronous events on the epoll thread seems to significantly reduce throughput in benchmarks. On the other
@@ -2483,6 +2484,7 @@ namespace System.Net.Sockets
                 _sendQueue.ProcessSyncEventOrGetAsyncEvent(this, processAsyncEvents: true);
             }
         }
+#endif
 
         // Called on ThreadPool thread.
         public unsafe void HandleEvents(Interop.Sys.SocketEvents events)

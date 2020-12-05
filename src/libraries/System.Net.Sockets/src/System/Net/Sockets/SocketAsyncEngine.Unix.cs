@@ -323,7 +323,11 @@ namespace System.Net.Sockets
                         else
 #endif
                         {
+#if false
                             Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
+#else
+                            Interop.Sys.SocketEvents events = socketEvent.Events;
+#endif
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
