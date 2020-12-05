@@ -844,7 +844,7 @@ namespace System.Net.Sockets
                 }
             }
 
-            public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
+            public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
             {
                 AsyncOperation op;
                 using (Lock())
@@ -865,6 +865,9 @@ namespace System.Net.Sockets
                             Debug.Assert(_isNextOperationSynchronous == (op.Event != null));
                             if (skipAsyncEvents && !_isNextOperationSynchronous)
                             {
+                                // All this really means is that we don't seem to ever lose the race with the speculative check.
+                                // That is, we checked _isNextOperationSynchronous outside of the lock in the caller, and it must have been true there.
+                                // So, this actually isn't surprising.
                                 Debug.Assert(false, "We don't ever seem to get here, why?");
                                 Debug.Assert(!processAsyncEvents);
                                 // Return the operation to indicate that the async operation was not processed, without making
