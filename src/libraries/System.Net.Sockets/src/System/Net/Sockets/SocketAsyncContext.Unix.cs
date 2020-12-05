@@ -969,14 +969,12 @@ namespace System.Net.Sockets
                 return (aborted: false, retry: true, observedSequenceNumber: observedSequenceNumber);
             }
 
-            public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
+            // Note, I changed the default of processAsyncEvents to false.
+            // I believe this is more correct, but it's still a change in behavior...
+            public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
             {
-                // These paths are hacked out for now
-//                Debug.Assert(!skipAsyncEvents);
-//                Debug.Assert(!processAsyncEvents);
-
-                // Hack. This is a change in behavior but I think it's correct.
-//                processAsyncEvents = false;
+                // This path is hacked out for now
+                Debug.Assert(!processAsyncEvents);
 
                 AsyncOperation op;
                 using (Lock())
