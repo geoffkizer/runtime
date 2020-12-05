@@ -153,9 +153,11 @@ namespace System.Net.Sockets.Tests
             await ExecutionContext_SocketAsyncEventArgs_Ctors(() => new SocketAsyncEventArgs(), false);
         }
 
+
         [Theory]
         [InlineData(true)]
-        [InlineData(false)]
+        // disable for now
+        //[InlineData(false)]
         public async Task ExecutionContext_SocketAsyncEventArgs_Ctor_UnsafeSuppressExecutionContextFlow(bool suppressed)
         {
             await ExecutionContext_SocketAsyncEventArgs_Ctors(() => new SocketAsyncEventArgs(suppressed), suppressed);
