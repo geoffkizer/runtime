@@ -971,6 +971,10 @@ namespace System.Net.Sockets
 
             public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
             {
+                // These paths are hacked out for now
+                Debug.Assert(!skipAsyncEvents);
+                Debug.Assert(!processAsyncEvents);
+
                 AsyncOperation op;
                 using (Lock())
                 {
