@@ -2456,14 +2456,14 @@ namespace System.Net.Sockets
             }
 
             if ((events & Interop.Sys.SocketEvents.Read) != 0 &&
-                _receiveQueue.IsNextOperationSynchronous_Speculative &&
+//                _receiveQueue.IsNextOperationSynchronous_Speculative &&
                 _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this, skipAsyncEvents: true) == null)
             {
                 events ^= Interop.Sys.SocketEvents.Read;
             }
 
             if ((events & Interop.Sys.SocketEvents.Write) != 0 &&
-                _sendQueue.IsNextOperationSynchronous_Speculative &&
+//                _sendQueue.IsNextOperationSynchronous_Speculative &&
                 _sendQueue.ProcessSyncEventOrGetAsyncEvent(this, skipAsyncEvents: true) == null)
             {
                 events ^= Interop.Sys.SocketEvents.Write;
