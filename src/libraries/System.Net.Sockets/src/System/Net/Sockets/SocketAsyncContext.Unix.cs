@@ -972,7 +972,7 @@ namespace System.Net.Sockets
             public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = true)
             {
                 // These paths are hacked out for now
-                Debug.Assert(!skipAsyncEvents);
+//                Debug.Assert(!skipAsyncEvents);
 //                Debug.Assert(!processAsyncEvents);
 
                 // Hack. This is a change in behavior but I think it's correct.
@@ -2433,7 +2433,6 @@ namespace System.Net.Sockets
             return SocketError.IOPending;
         }
 
-#if false
         // Called on the epoll thread, speculatively tries to process synchronous events and errors for synchronous events, and
         // returns any remaining events that remain to be processed. Taking a lock for each operation queue to deterministically
         // handle synchronous events on the epoll thread seems to significantly reduce throughput in benchmarks. On the other
@@ -2471,6 +2470,7 @@ namespace System.Net.Sockets
             return events;
         }
 
+#if false
         // Called on the epoll thread.
         public void HandleEventsInline(Interop.Sys.SocketEvents events)
         {
