@@ -1502,10 +1502,18 @@ namespace System.Net.Sockets
             return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
+        private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
+
         [System.Runtime.InteropServices.DllImport("libc")] private static extern int printf(string format, string arg);
 
         //private static void Print(string s) => printf("%s\r\n", s);
-        private static void Print(string s) { }
+        private static void Print(string s)
+        {
+            if (TraceEnabled)
+            {
+                printf("%s\r\n", s);
+            }
+        }
 
         // Note, this isn;t sync-specific anymore
 
