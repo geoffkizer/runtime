@@ -973,8 +973,11 @@ namespace System.Net.Sockets
             {
                 // These paths are hacked out for now
                 Debug.Assert(!skipAsyncEvents);
-                Debug.Assert(!processAsyncEvents);
+//                Debug.Assert(!processAsyncEvents);
 
+                // Hack. This is a change in behavior but I think it's correct.
+                processAsyncEvents = false;
+                
                 AsyncOperation op;
                 using (Lock())
                 {
