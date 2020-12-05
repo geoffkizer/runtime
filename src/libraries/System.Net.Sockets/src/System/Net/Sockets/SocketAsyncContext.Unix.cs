@@ -1505,6 +1505,7 @@ namespace System.Net.Sockets
         [System.Runtime.InteropServices.DllImport("libc")] private static extern int printf(string format, string arg);
 
         //private static void Print(string s) => printf("%s\r\n", s);
+        private static void Print(string s) { }
 
         // Note, this isn;t sync-specific anymore
 
