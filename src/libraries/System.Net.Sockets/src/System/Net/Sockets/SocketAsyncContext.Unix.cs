@@ -1502,7 +1502,8 @@ namespace System.Net.Sockets
             return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
-        private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
+        //private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
+        private const bool TraceEnabled = true;
 
         [System.Runtime.InteropServices.DllImport("libc")] private static extern int printf(string format, string arg);
 
