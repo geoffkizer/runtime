@@ -327,6 +327,14 @@ namespace System.Net.Sockets
                             Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
 #else
                             Interop.Sys.SocketEvents events = socketEvent.Events;
+
+                            if ((events & Interop.Sys.SocketEvents.Error) != 0)
+                            {
+                                // Set the Read and Write flags; the processing for these events
+                                // will pick up the error.
+                                events ^= Interop.Sys.SocketEvents.Error;
+                                events |= Interop.Sys.SocketEvents.Read | Interop.Sys.SocketEvents.Write;
+                            }
 #endif
 
                             if (events != Interop.Sys.SocketEvents.None)

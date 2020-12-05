@@ -2445,6 +2445,7 @@ namespace System.Net.Sockets
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Interop.Sys.SocketEvents HandleSyncEventsSpeculatively(Interop.Sys.SocketEvents events)
         {
+        // NOTE: I moved this code up to caller. it's not necessary here anymore, and shouldn't really have been here in the first place.
             if ((events & Interop.Sys.SocketEvents.Error) != 0)
             {
                 // Set the Read and Write flags; the processing for these events
