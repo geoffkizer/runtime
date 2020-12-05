@@ -1074,7 +1074,7 @@ namespace System.Net.Sockets
                 OperationResult result = ProcessQueuedOperation(op);
 
                 Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
-                Debug.Assert(op.CompletionSource == null, "CompletionSource not null in ProcessAsyncOperation")
+                Debug.Assert(op.CompletionSource == null, "CompletionSource not null in ProcessAsyncOperation");
 
                 if (result == OperationResult.Completed)
                 {
