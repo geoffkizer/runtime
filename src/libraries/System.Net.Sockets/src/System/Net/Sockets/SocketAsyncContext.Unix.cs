@@ -136,7 +136,7 @@ namespace System.Net.Sockets
             public CancellationTokenRegistration CancellationRegistration;
 
             public ManualResetEventSlim? Event { get; set; }
-            public TaskCompletionSource? CompletionSource { get; set; }
+            public TaskCompletionSource<bool>? CompletionSource { get; set; }
 
             public AsyncOperation(SocketAsyncContext context)
             {
@@ -246,14 +246,14 @@ namespace System.Net.Sockets
                 DoAbort();
 
                 ManualResetEventSlim? e = Event;
-                TaskCompletionSource? tcs = CompletionSource;
+                TaskCompletionSource<bool>? tcs = CompletionSource;
                 if (e != null)
                 {
                     e.Set();
                 }
                 else if (tcs is not null)
                 {
-                    tcs.TrySetResult();
+                    tcs.TrySetResult(true);         // True indicates cancellation
                 }
                 else
                 {
@@ -277,7 +277,7 @@ namespace System.Net.Sockets
             public void Dispatch()
             {
                 ManualResetEventSlim? e = Event;
-                TaskCompletionSource? tcs = CompletionSource;
+                TaskCompletionSource<bool>? tcs = CompletionSource;
                 if (e != null)
                 {
                     // Sync operation.  Signal waiting thread to continue processing.
@@ -285,7 +285,7 @@ namespace System.Net.Sockets
                 }
                 else if (tcs is not null)
                 {
-                    tcs.TrySetResult();
+                    tcs.TrySetResult(false);
                 }
                 else
                 {
@@ -1025,7 +1025,7 @@ namespace System.Net.Sockets
                 }
 
                 ManualResetEventSlim? e = op.Event;
-                TaskCompletionSource? tcs = op.CompletionSource;
+                TaskCompletionSource<bool>? tcs = op.CompletionSource;
                 if (e != null)
                 {
                     // Sync operation.  Signal waiting thread to continue processing.
@@ -1034,7 +1034,7 @@ namespace System.Net.Sockets
                 }
                 else if (tcs is not null)
                 {
-                    tcs.TrySetResult();
+                    tcs.TrySetResult(false);
                     return null;
                 }
                 else
@@ -1584,12 +1584,16 @@ namespace System.Net.Sockets
             {
                 Debug.Assert(state._operation.CompletionSource is not null);
 
-                await state._operation.CompletionSource.Task.ConfigureAwait(false);
+                bool cancelled = await state._operation.CompletionSource.Task.ConfigureAwait(false);
+                if (cancelled)
+                {
+                    return (false, state);
+                }
 
                 // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
                 // TODO: Obviously this is suboptimal, not clear what's better; revisit later
 
-                state._operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                 return (true, state);
             }
@@ -1718,7 +1722,7 @@ namespace System.Net.Sockets
                         }
 
                         // Allocate the TCS we will wait on
-                        state._operation.CompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                         (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber, state._cancellationToken);
                         if (cancelled)
