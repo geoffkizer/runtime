@@ -321,6 +321,8 @@ namespace System.Net.Sockets
 
                             // NOTE: We are always processing the op right now. See below.
 
+                            _dataAvailable = true;
+
                             _state = QueueState.Processing;
                             // Break out and release lock
                             break;
