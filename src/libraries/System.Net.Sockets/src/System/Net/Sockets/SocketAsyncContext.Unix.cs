@@ -1233,11 +1233,11 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            private bool WaitForSemaphoreAsync()
+            private async ValueTask<bool> WaitForSemaphoreAsync()
             {
                 try
                 {
-                    _operation.OperationQueue._semaphore.WaitAsync(_cancellationToken);
+                    await _operation.OperationQueue._semaphore.WaitAsync(_cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1311,7 +1311,11 @@ namespace System.Net.Sockets
 
                 if (!_isStarted)
                 {
-                    WaitForSemaphoreSync();
+                    if (!WaitForSemaphoreSync())
+                    {
+                        // Timeout
+                        return (false, SocketError.TimedOut);
+                    }
 
                     _isStarted = true;
                     if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
@@ -1410,6 +1414,12 @@ namespace System.Net.Sockets
                 {
                     if (!state._isStarted)
                     {
+                        if (!await state.WaitForSemaphoreAsync().ConfigureAwait(false))
+                        {
+                            // Cancellation occurred
+                            return (false, SocketError.OperationAborted, state);
+                        }
+
                         state._isStarted = true;
                         if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext, out state._observedSequenceNumber))
                         {
