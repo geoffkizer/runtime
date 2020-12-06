@@ -264,9 +264,7 @@ namespace System.Net.Sockets
 
                             // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
                             _state = QueueState.Waiting;
-                            goto case QueueState.Waiting;
 
-                        case QueueState.Waiting:
                             // Enqueue the operation.
                             Debug.Assert(_currentOperation == null);
 
