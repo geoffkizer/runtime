@@ -36,6 +36,7 @@ namespace System.Net.Sockets
 
     internal sealed class SocketAsyncContext
     {
+        // TODO: The whole AsyncOperation infrastructure should die.
         private abstract class AsyncOperation : IThreadPoolWorkItem
         {
             private enum State
@@ -55,8 +56,6 @@ namespace System.Net.Sockets
             public readonly SocketAsyncContext AssociatedContext;
             public AsyncOperation Next = null!; // initialized by helper called from ctor
             public SocketError ErrorCode;
-            public byte[]? SocketAddress;
-            public int SocketAddressLen;
             public CancellationTokenRegistration CancellationRegistration;
 
             public ManualResetEventSlim? Event { get; set; }
@@ -250,11 +249,8 @@ namespace System.Net.Sockets
             // Called when op is not in the queue yet, so can't be otherwise executing
             public void DoAbort()
             {
-                Abort();
                 ErrorCode = SocketError.OperationAborted;
             }
-
-            protected abstract void Abort();
 
             protected abstract bool DoTryComplete(SocketAsyncContext context);
 
@@ -314,8 +310,6 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            protected sealed override void Abort() { }
-
             public override void InvokeCallback(bool allowPooling)
             {
                 Debug.Assert(false);
@@ -331,8 +325,6 @@ namespace System.Net.Sockets
                 Debug.Assert(false);
                 return true;
             }
-
-            protected sealed override void Abort() { }
 
             public override void InvokeCallback(bool allowPooling)
             {
@@ -373,6 +365,10 @@ namespace System.Net.Sockets
         private struct OperationQueue<TOperation>
             where TOperation : AsyncOperation
         {
+            // This is new stuff:
+            public SemaphoreSlim _semaphore;
+            // TODO: This is not getting disposed currently.
+
             // Quick overview:
             //
             // When attempting to perform an IO operation, the caller first checks IsReady,
@@ -429,6 +425,8 @@ namespace System.Net.Sockets
 
                 _state = QueueState.Ready;
                 _sequenceNumber = 0;
+
+                _semaphore = new SemaphoreSlim(1, 1);
             }
 
             // IsReady returns whether an operation can be executed immediately.
@@ -1209,6 +1207,51 @@ namespace System.Net.Sockets
                 _operation = operation;
             }
 
+            private bool WaitForSemaphoreSync()
+            {
+                DateTime waitStart = DateTime.UtcNow;
+
+                if (!_operation.OperationQueue._semaphore.Wait(_timeout))
+                {
+                    _operation.ErrorCode = SocketError.TimedOut;
+                    return false;
+                }
+
+                // Adjust timeout for next attempt.
+                if (_timeout > 0)
+                {
+                    _timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
+
+                    if (_timeout <= 0)
+                    {
+                        _operation.ErrorCode = SocketError.TimedOut;
+                        ReleaseSemaphore();
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            private bool WaitForSemaphoreAsync()
+            {
+                try
+                {
+                    _operation.OperationQueue._semaphore.WaitAsync(_cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            private void ReleaseSemaphore()
+            {
+                _operation.OperationQueue._semaphore.Release();
+            }
+
             // TODO: COuld be merged below?
             private bool WaitForSyncSignal()
             {
@@ -1268,6 +1311,8 @@ namespace System.Net.Sockets
 
                 if (!_isStarted)
                 {
+                    WaitForSemaphoreSync();
+
                     _isStarted = true;
                     if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
                     {
@@ -1281,6 +1326,7 @@ namespace System.Net.Sockets
                     SocketError errorCode;
                     if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                     {
+                        Cleanup();
                         return (false, errorCode);
                     }
 
@@ -1296,7 +1342,6 @@ namespace System.Net.Sockets
 
                     if (retry)
                     {
-                        Cleanup();
                         return (true, default);
                     }
 
@@ -1380,6 +1425,7 @@ namespace System.Net.Sockets
                         SocketError errorCode;
                         if (!state._operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                         {
+                            state.Cleanup();
                             return (false, errorCode, state);
                         }
 
@@ -1479,6 +1525,11 @@ namespace System.Net.Sockets
                 // Note: this used to happen in ProcessAsyncOperation, but this seems like the appropriate place to do it now.
 
                 _operation.CancellationRegistration.Dispose();
+
+                if (_isStarted)
+                {
+                    ReleaseSemaphore();
+                }
             }
         }
 
