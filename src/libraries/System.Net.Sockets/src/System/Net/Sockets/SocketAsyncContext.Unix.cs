@@ -216,6 +216,8 @@ namespace System.Net.Sockets
                         return true;
                     }
 
+                    Debug.Assert(_dataAvailable);
+
                     _dataAvailable = false;
                     return (_state == QueueState.Ready);
                 }
