@@ -101,49 +101,8 @@ namespace System.Net.Sockets
             // This is called two places:
             // One, when CancellationToken fires. Though actually, I've disabled this.
             // Two, from StopAndAbort
-            public bool TryCancel()
+            public void TryCancel()
             {
-                Trace("Enter");
-
-#if false
-                // Try to transition from Waiting to Cancelled
-                SpinWait spinWait = default;
-                bool keepWaiting = true;
-                while (keepWaiting)
-                {
-                    int state = Interlocked.CompareExchange(ref _state, (int)State.Cancelled, (int)State.Waiting);
-                    switch ((State)state)
-                    {
-                        case State.Running:
-                            // A completion attempt is in progress. Keep busy-waiting.
-                            Trace("Busy wait");
-                            spinWait.SpinOnce();
-                            break;
-
-                        case State.Complete:
-                            // A completion attempt succeeded. Consider this operation as having completed within the timeout.
-                            Trace("Exit, previously completed");
-                            return false;
-
-                        case State.Waiting:
-                            // This operation was successfully cancelled.
-                            // Break out of the loop to handle the cancellation
-                            keepWaiting = false;
-                            break;
-
-                        case State.Cancelled:
-                            // Someone else cancelled the operation.
-                            // The previous canceller will have fired the completion, etc.
-                            Trace("Exit, previously cancelled");
-                            return false;
-                    }
-                }
-#endif
-
-                Trace("Cancelled, processing completion");
-
-                // The operation successfully cancelled.
-                // It's our responsibility to set the error code and queue the completion.
                 DoAbort();
 
                 ManualResetEventSlim? e = Event;
@@ -160,12 +119,6 @@ namespace System.Net.Sockets
                 {
                     Debug.Assert(false);
                 }
-
-                Trace("Exit");
-
-                // Note, we leave the operation in the OperationQueue.
-                // When we get around to processing it, we'll see it's cancelled and skip it.
-                return true;
             }
 
             // TODO: I don't think I should need to explicitly pass [cancel] here.
