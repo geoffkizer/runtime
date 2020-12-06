@@ -324,7 +324,8 @@ namespace System.Net.Sockets
             }
 
             // This is only called in the case of sync timeout or async cancellation via CancellationToken.
-            public void CancelAndContinueProcessing(TOperation op)
+            // All it really does now is set _dataAvailable =true; is that worthwhile?
+            public void CancelAndContinueProcessing()
             {
                 // Remove operation from queue.
                 // Note it must be there since it can only be processed and removed by the caller.
@@ -336,9 +337,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation == op);
-
-                        // No more operations
+                        // Clear out current operation; it's been canceled
                         _currentOperation = null;
 
                         // Just assume there is data available.
@@ -721,7 +720,7 @@ namespace System.Net.Sockets
                 if (!WaitForSyncSignal())
                 {
                     // Timeout occurred.
-                    _operation.OperationQueue.CancelAndContinueProcessing(_operation);
+                    _operation.OperationQueue.CancelAndContinueProcessing();
 
                     Cleanup();
                     return (false, SocketError.TimedOut);
@@ -839,7 +838,7 @@ namespace System.Net.Sockets
                         Print($"--- WaitForAsyncRetry: WaitForAsyncSignal returned false; cancel and return false");
 
                         // Cancellation occurred. Error code is set.
-                        state._operation.OperationQueue.CancelAndContinueProcessing(state._operation);
+                        state._operation.OperationQueue.CancelAndContinueProcessing();
 
                         state.Cleanup();
                         return (false, SocketError.OperationAborted, state);
