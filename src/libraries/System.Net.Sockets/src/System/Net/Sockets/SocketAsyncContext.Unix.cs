@@ -198,16 +198,10 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    // the mutex should ensure this
-                    Debug.Assert(_currentOperation == null);
-
-                    if (_currentOperation == null)
-                    {
-                        _dataAvailable = false;
-                        return true;
-                    }
-
-                    return false;
+                    // We always return true from this.
+                    // The semaphore will enforce serialization of operations.
+                    _dataAvailable = false;
+                    return true;
                 }
             }
 
