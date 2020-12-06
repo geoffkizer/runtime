@@ -405,7 +405,6 @@ namespace System.Net.Sockets
             // These fields define the queue state.
 
             private QueueState _state;      // See above
-            private bool _isNextOperationSynchronous;
             private int _sequenceNumber;    // This sequence number is updated when we receive an epoll notification.
                                             // It allows us to detect when a new epoll notification has arrived
                                             // since the last time we checked the state of the queue.
@@ -419,8 +418,6 @@ namespace System.Net.Sockets
             private object _queueLock;
 
             private LockToken Lock() => new LockToken(_queueLock);
-
-            public bool IsNextOperationSynchronous_Speculative => _isNextOperationSynchronous;
 
             public void Init()
             {
@@ -589,9 +586,6 @@ namespace System.Net.Sockets
                         case QueueState.Processing:
                             // Enqueue the operation.
                             Debug.Assert(_tail == null);
-
-                            Debug.Assert(!_isNextOperationSynchronous);
-                            _isNextOperationSynchronous = operation.Event != null;
 
                             _tail = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
@@ -901,7 +895,6 @@ namespace System.Net.Sockets
 
                         // No more operations to process
                         _tail = null;
-                        _isNextOperationSynchronous = false;
                         _state = QueueState.Ready;
                         _sequenceNumber++;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
@@ -930,7 +923,6 @@ namespace System.Net.Sockets
 
                         // No more operations
                         _tail = null;
-                        _isNextOperationSynchronous = false;
 
                         // We're the first op in the queue.
                         if (_state == QueueState.Processing)
@@ -971,7 +963,6 @@ namespace System.Net.Sockets
                     }
 
                     _tail = null;
-                    _isNextOperationSynchronous = false;
 
                     Trace(context, $"Exit");
                 }
