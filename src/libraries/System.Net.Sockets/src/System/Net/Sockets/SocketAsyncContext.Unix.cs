@@ -207,6 +207,13 @@ namespace System.Net.Sockets
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
             // NOTE: Using this for async ops now too....
+
+
+
+
+            // TODO:
+            // Push the context regsitration into caller,
+            // and get rid of this routine -- call PendQueuedOperation instead.
             public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation)
             {
                 // TODO: This could probably be popped up a level, or handled differently...
