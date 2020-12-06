@@ -166,7 +166,9 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Signal()
+            // TODO: I don't think I should need to explicitly pass [cancel] here.
+            // The receiver of the signal should check the state and determine it's a cancellation.
+            public void Signal(bool cancel = false)
             {
                 ManualResetEventSlim? e = Event;
                 TaskCompletionSource<bool>? tcs = CompletionSource;
@@ -176,7 +178,7 @@ namespace System.Net.Sockets
                 }
                 else if (tcs is not null)
                 {
-                    tcs.TrySetResult(false);
+                    tcs.TrySetResult(cancel);
                 }
                 else
                 {
@@ -655,9 +657,9 @@ namespace System.Net.Sockets
                     if (_tail != null)
                     {
                         AsyncOperation op = _tail;
-                        aborted |= op.TryCancel();
 
-                        // Test
+                        op.Signal(true);
+
                         aborted = true;
                     }
 
