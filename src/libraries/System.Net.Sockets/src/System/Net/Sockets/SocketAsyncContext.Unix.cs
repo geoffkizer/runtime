@@ -652,6 +652,8 @@ namespace System.Net.Sockets
                         case QueueState.Waiting:
                             Debug.Assert(_tail != null, "State == Waiting but queue is empty!");
                             op = _tail;
+
+#if false
                             Debug.Assert(_isNextOperationSynchronous == (op.Event != null));
                             if (skipAsyncEvents && !_isNextOperationSynchronous)
                             {
@@ -660,6 +662,7 @@ namespace System.Net.Sockets
                                 // any state changes because async operations are being skipped
                                 return op;
                             }
+#endif
 
                             _state = QueueState.Processing;
                             // Break out and release lock
@@ -2349,6 +2352,8 @@ namespace System.Net.Sockets
             {
                 events ^= Interop.Sys.SocketEvents.Write;
             }
+
+            Debug.Assert(events == 0);
 
             return events;
         }
