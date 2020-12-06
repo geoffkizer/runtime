@@ -41,7 +41,6 @@ namespace System.Net.Sockets
         private abstract class AsyncOperation
         {
             public readonly SocketAsyncContext AssociatedContext;
-            public SocketError ErrorCode;
 
             public ManualResetEventSlim? Event { get; set; }
             public TaskCompletionSource<bool>? CompletionSource { get; set; }
@@ -56,7 +55,6 @@ namespace System.Net.Sockets
             // This is called from StopAndAbort
             public void TryCancel()
             {
-                DoAbort();
                 Signal();
             }
 
@@ -78,12 +76,6 @@ namespace System.Net.Sockets
                 {
                     Debug.Assert(false);
                 }
-            }
-
-            // Called when op is not in the queue yet, so can't be otherwise executing
-            public void DoAbort()
-            {
-                ErrorCode = SocketError.OperationAborted;
             }
         }
 
