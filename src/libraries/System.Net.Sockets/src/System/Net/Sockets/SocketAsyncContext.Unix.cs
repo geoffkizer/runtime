@@ -59,19 +59,6 @@ namespace System.Net.Sockets
                 CompletionSource = null;
             }
 
-            public bool TrySetRunning()
-            {
-                return true;
-            }
-
-            public void SetComplete()
-            {
-            }
-
-            public void SetWaiting()
-            {
-            }
-
             // This is called two places:
             // One, when CancellationToken fires. Though actually, I've disabled this.
             // Two, from StopAndAbort
@@ -440,21 +427,11 @@ namespace System.Net.Sockets
                     }
                 }
 
-                // Try to change the op state to Running.
-                // If this fails, it means the operation was previously cancelled,
-                // and we should just remove it from the queue without further processing.
-                if (!op.TrySetRunning())
-                {
-                    RemoveQueuedOperation(op);
-                    return (true, 0);
-                }
-
                 return (false, observedSequenceNumber);
             }
 
             public void CompleteQueuedOperation(TOperation op)
             {
-                op.SetComplete();
                 RemoveQueuedOperation(op);
             }
 
@@ -462,8 +439,6 @@ namespace System.Net.Sockets
             // Set it to pend again, unless we need to retry again
             public (bool cancelled, bool retry, int observedSequenceNumber) PendQueuedOperation(TOperation op, int observedSequenceNumber)
             {
-                op.SetWaiting();
-
                 // Check for retry and reset queue state.
 
                 using (Lock())
@@ -492,15 +467,6 @@ namespace System.Net.Sockets
                             return (false, false, 0);
                         }
                     }
-                }
-
-                // Try to change the op state to Running.
-                // If this fails, it means the operation was previously cancelled,
-                // and we should just remove it from the queue without further processing.
-                if (!op.TrySetRunning())
-                {
-                    RemoveQueuedOperation(op);
-                    return (true, false, 0);
                 }
 
                 return (false, true, observedSequenceNumber);
