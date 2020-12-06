@@ -240,6 +240,7 @@ namespace System.Net.Sockets
                     }
 
                     Debug.Assert(_isReady);
+                    Debug.Assert(_currentOperation == null);
 
                     if (_dataAvailable)
                     {
@@ -252,11 +253,8 @@ namespace System.Net.Sockets
 
                     // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
                     _isReady = false;
-
-                    // Enqueue the operation.
-                    Debug.Assert(_currentOperation == null);
-
                     _currentOperation = operation;
+
                     Trace(context, $"Leave, enqueued {IdOf(operation)}");
 
                     return (aborted: false, retry: false);
