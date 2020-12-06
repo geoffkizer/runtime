@@ -57,12 +57,12 @@ namespace System.Net.Sockets
             public void TryCancel()
             {
                 DoAbort();
-                Signal(false);
+                Signal();
             }
 
             // TODO: I don't think I should need to explicitly pass [cancel] here.
             // The receiver of the signal should check the state and determine it's a cancellation.
-            public void Signal(bool cancel = false)
+            public void Signal()
             {
                 ManualResetEventSlim? e = Event;
                 TaskCompletionSource<bool>? tcs = CompletionSource;
@@ -72,7 +72,7 @@ namespace System.Net.Sockets
                 }
                 else if (tcs is not null)
                 {
-                    tcs.TrySetResult(cancel);
+                    tcs.TrySetResult(false);
                 }
                 else
                 {
