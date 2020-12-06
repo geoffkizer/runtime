@@ -76,20 +76,6 @@ namespace System.Net.Sockets
 #endif
             }
 
-            public bool TryComplete(SocketAsyncContext context)
-            {
-                // TODO: Remove parameter?
-                Debug.Assert(context == AssociatedContext);
-
-                TraceWithContext(context, "Enter");
-
-                bool result = DoTryComplete(context);
-
-                TraceWithContext(context, $"Exit, result={result}");
-
-                return result;
-            }
-
             public bool TrySetRunning()
             {
                 State oldState = (State)Interlocked.CompareExchange(ref _state, (int)State.Running, (int)State.Waiting);
@@ -179,15 +165,6 @@ namespace System.Net.Sockets
                 else
                 {
                     Debug.Assert(false);
-
-#if DEBUG
-                    Debug.Assert(Interlocked.CompareExchange(ref _callbackQueued, 1, 0) == 0, $"Unexpected _callbackQueued: {_callbackQueued}");
-#endif
-                    // We've marked the operation as canceled, and so should invoke the callback, but
-                    // we can't pool the object, as ProcessQueue may still have a reference to it, due to
-                    // using a pattern whereby it takes the lock to grab an item, but then releases the lock
-                    // to do further processing on the item that's still in the list.
-                    ThreadPool.UnsafeQueueUserWorkItem(o => ((AsyncOperation)o!).InvokeCallback(allowPooling: false), this);
                 }
 
                 Trace("Exit");
@@ -202,10 +179,6 @@ namespace System.Net.Sockets
             {
                 ErrorCode = SocketError.OperationAborted;
             }
-
-            protected abstract bool DoTryComplete(SocketAsyncContext context);
-
-            public abstract void InvokeCallback(bool allowPooling);
 
             [Conditional("SOCKETASYNCCONTEXT_TRACE")]
             public void Trace(string message, [CallerMemberName] string? memberName = null)
@@ -250,33 +223,11 @@ namespace System.Net.Sockets
         private sealed class DumbSyncReceiveOperation : ReadOperation
         {
             public DumbSyncReceiveOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override bool DoTryComplete(SocketAsyncContext context)
-            {
-                Debug.Assert(false);
-                return true;
-            }
-
-            public override void InvokeCallback(bool allowPooling)
-            {
-                Debug.Assert(false);
-            }
         }
 
         private sealed class DumbSyncSendOperation : WriteOperation
         {
             public DumbSyncSendOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override bool DoTryComplete(SocketAsyncContext context)
-            {
-                Debug.Assert(false);
-                return true;
-            }
-
-            public override void InvokeCallback(bool allowPooling)
-            {
-                Debug.Assert(false);
-            }
         }
 
         // In debug builds, this struct guards against:
