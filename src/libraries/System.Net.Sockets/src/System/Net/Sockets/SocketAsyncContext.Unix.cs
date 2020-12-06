@@ -366,7 +366,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation == null);
+                        Debug.Assert(_currentOperation != null);
 
                         // No more operations
                         _currentOperation = null;
