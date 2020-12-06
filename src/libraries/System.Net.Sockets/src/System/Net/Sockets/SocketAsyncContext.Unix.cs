@@ -2419,39 +2419,59 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError SendToAsync(Memory<byte> buffer, int offset, int count, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesSent, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
+        private async ValueTask<(SocketError socketError, int bytesSent, int socketAddressLen)> InternalSendToAsync(Memory<byte> buffer, int offset, int count, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, CancellationToken cancellationToken)
         {
             SetNonBlocking();
 
-            bytesSent = 0;
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteSendTo(_socket, buffer.Span, ref offset, ref count, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+
+            int bytesSent = 0;
+
+            var state = CreateAsyncReadOperationState(cancellationToken);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode, state) = await WaitForReadAsyncRetry(state).ConfigureAwait(false);
+                if (!retry)
+                {
+                    return (errorCode, default, default);
+                }
+
+                if (SocketPal.TryCompleteSendTo(_socket, buffer.Span, ref offset, ref count, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return (errorCode, bytesSent, socketAddressLen);
+                }
             }
+        }
 
-            BufferMemorySendOperation operation = RentBufferMemorySendOperation();
-            operation.Callback = callback;
-            operation.Buffer = buffer;
-            operation.Offset = offset;
-            operation.Count = count;
-            operation.Flags = flags;
-            operation.SocketAddress = socketAddress;
-            operation.SocketAddressLen = socketAddressLen;
-            operation.BytesTransferred = bytesSent;
+        public SocketError SendToAsync(Memory<byte> buffer, int offset, int count, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesSent, Action<int, byte[]?, int, SocketFlags, SocketError> callback, CancellationToken cancellationToken = default)
+        {
+            ValueTask<(SocketError socketError, int bytesReceived, int socketAddressLen)> vt = InternalSendToAsync(buffer, offset, count, flags, socketAddress, socketAddressLen, cancellationToken);
+            bool completedSynchronously = vt.IsCompleted;
 
-            if (!_sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber, cancellationToken))
+            if (completedSynchronously)
             {
-                bytesSent = operation.BytesTransferred;
-                errorCode = operation.ErrorCode;
-
-                ReturnOperation(operation);
-                return errorCode;
+                SocketError socketError;
+                (socketError, bytesSent, socketAddressLen) = vt.GetAwaiter().GetResult();
+                return socketError;
             }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    Debug.Assert(vt.IsCompleted);
 
-            return SocketError.IOPending;
+                    SocketError socketError;
+                    int bytesSent;
+                    int socketAddressLen;
+                    (socketError, bytesSent, socketAddressLen) = vt.GetAwaiter().GetResult();
+                    callback(bytesSent, socketAddress, socketAddressLen, SocketFlags.None, socketError);
+                });
+
+                bytesSent = default;
+                return SocketError.IOPending;
+            }
         }
 
         public SocketError Send(IList<ArraySegment<byte>> buffers, SocketFlags flags, int timeout, out int bytesSent)
