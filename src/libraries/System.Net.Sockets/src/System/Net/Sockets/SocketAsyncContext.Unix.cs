@@ -197,7 +197,7 @@ namespace System.Net.Sockets
             private QueueState _state;      // See above
 
             // This replaces the old sequence number.
-            private bool _newDataAvailable;
+            private bool _dataAvailable;
 
             private AsyncOperation? _currentOperation;
 
@@ -214,7 +214,7 @@ namespace System.Net.Sockets
                 _queueLock = new object();
 
                 _state = QueueState.Ready;
-                _newDataAvailable = false;
+                _dataAvailable = false;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
@@ -228,7 +228,7 @@ namespace System.Net.Sockets
                 using (Lock())
                 {
                     QueueState state = _state;
-                    _newDataAvailable = false;
+                    _dataAvailable = false;
 
                     bool isReady = state == QueueState.Ready || state == QueueState.Stopped;
 
@@ -244,7 +244,6 @@ namespace System.Net.Sockets
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
             // NOTE: Using this for async ops now too....
-            // NOTE: CancellationToken is never passed here anymore
             public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation)
             {
                 Trace(context, $"Enter");
@@ -261,11 +260,11 @@ namespace System.Net.Sockets
                     switch (_state)
                     {
                         case QueueState.Ready:
-                            if (_newDataAvailable)
+                            if (_dataAvailable)
                             {
                                 // The queue has become ready again since we previously checked it.
                                 // So, we need to retry the operation before we enqueue it.
-                                _newDataAvailable = false;
+                                _dataAvailable = false;
                                 break;
                             }
 
@@ -327,7 +326,7 @@ namespace System.Net.Sockets
                     {
                         case QueueState.Ready:
                             Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
-                            _newDataAvailable = true;
+                            _dataAvailable = true;
                             Trace(context, $"Exit (previously ready)");
                             return;
 
@@ -343,7 +342,7 @@ namespace System.Net.Sockets
 
                         case QueueState.Processing:
                             Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
-                            _newDataAvailable = true;
+                            _dataAvailable = true;
                             Trace(context, $"Exit (currently processing)");
                             return;
 
@@ -378,7 +377,7 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
                         Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
-                        _newDataAvailable = false;
+                        _dataAvailable = false;
                     }
                 }
 
@@ -408,9 +407,9 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
 
-                        if (_newDataAvailable)
+                        if (_dataAvailable)
                         {
-                            _newDataAvailable = false;
+                            _dataAvailable = false;
                         }
                         else
                         {
@@ -442,7 +441,7 @@ namespace System.Net.Sockets
                         // No more operations to process
                         _currentOperation = null;
                         _state = QueueState.Ready;
-                        _newDataAvailable = true;
+                        _dataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
                 }
@@ -471,12 +470,12 @@ namespace System.Net.Sockets
                         if (_state == QueueState.Processing)
                         {
                             _state = QueueState.Ready;
-                            _newDataAvailable = true;
+                            _dataAvailable = true;
                         }
                         else if (_state == QueueState.Waiting)
                         {
                             _state = QueueState.Ready;
-                            _newDataAvailable = true;
+                            _dataAvailable = true;
                         }
                     }
                 }
@@ -523,7 +522,7 @@ namespace System.Net.Sockets
                     typeof(TOperation) == typeof(WriteOperation) ? "send" :
                     "???";
 
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_newDataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
+                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
             }
         }
 
