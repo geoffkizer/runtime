@@ -49,19 +49,11 @@ namespace System.Net.Sockets
             public AsyncOperation(SocketAsyncContext context)
             {
                 AssociatedContext = context;
-                Reset();
-            }
-
-            // This is only called from the constructor now, since we don't reuse operations
-            public void Reset()
-            {
                 Event = null;
                 CompletionSource = null;
             }
 
-            // This is called two places:
-            // One, when CancellationToken fires. Though actually, I've disabled this.
-            // Two, from StopAndAbort
+            // This is called from StopAndAbort
             public void TryCancel()
             {
                 DoAbort();
