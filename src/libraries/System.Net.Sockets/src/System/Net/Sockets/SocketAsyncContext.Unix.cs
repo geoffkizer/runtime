@@ -375,6 +375,7 @@ namespace System.Net.Sockets
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
             // NOTE: Using this for async ops now too....
+            // NOTE: CancellationToken is never passed here anymore
             public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
             {
                 Trace(context, $"Enter");
@@ -938,7 +939,15 @@ namespace System.Net.Sockets
             {
                 Debug.Assert(state._operation.CompletionSource is not null);
 
+                CancellationTokenRegistration registration = default;
+                if (state._cancellationToken.CanBeCanceled)
+                {
+                    registration = state._cancellationToken.Register((tcs, tkn) => ((TaskCompletionSource<bool>)tcs!).TrySetResult(true), state._operation.CompletionSource);
+                }
+
                 bool cancelled = await state._operation.CompletionSource.Task.ConfigureAwait(false);
+                registration.Dispose();
+
                 if (cancelled)
                 {
                     return (false, state);
@@ -1091,7 +1100,7 @@ namespace System.Net.Sockets
                         // Allocate the TCS we will wait on
                         state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber, state._cancellationToken);
+                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber, CancellationToken.None);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
