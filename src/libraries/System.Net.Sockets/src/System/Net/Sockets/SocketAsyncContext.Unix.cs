@@ -444,6 +444,7 @@ namespace System.Net.Sockets
                 }
             }
 
+            // This is only called in the case of sync timeout or async cancellation via CancellationToken.
             public void CancelAndContinueProcessing(TOperation op)
             {
                 // Remove operation from queue.
