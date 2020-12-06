@@ -202,6 +202,8 @@ namespace System.Net.Sockets
                         return true;
                     }
 
+                    Debug.Assert(_isReady == (_currentOperation == null));
+
                     if (_isReady)
                     {
                         Debug.Assert(_currentOperation == null);
