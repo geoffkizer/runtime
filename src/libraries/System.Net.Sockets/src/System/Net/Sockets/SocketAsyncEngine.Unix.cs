@@ -222,6 +222,9 @@ namespace System.Net.Sockets
 
         void IThreadPoolWorkItem.Execute()
         {
+            Debug.Assert(false);
+
+#if false
             // Indicate that a work item is no longer scheduled to process events. The change needs to be visible to enqueuer
             // threads (only for EventLoop() currently) before an event is attempted to be dequeued. In particular, if an
             // enqueuer queues an event and does not schedule a work item because it is already scheduled, and this thread is
@@ -272,6 +275,7 @@ namespace System.Net.Sockets
 
             // The queue was not observed to be empty, schedule another work item before yielding the thread
             ScheduleToProcessEvents();
+#endif
         }
 
         private void FreeNativeResources()
@@ -323,25 +327,15 @@ namespace System.Net.Sockets
                         else
 #endif
                         {
-#if true
-                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
-#else
-                            Interop.Sys.SocketEvents events = socketEvent.Events;
+                            context.HandleEventsOnEpollThread(socketEvent.Events);
 
-                            if ((events & Interop.Sys.SocketEvents.Error) != 0)
-                            {
-                                // Set the Read and Write flags; the processing for these events
-                                // will pick up the error.
-                                events ^= Interop.Sys.SocketEvents.Error;
-                                events |= Interop.Sys.SocketEvents.Read | Interop.Sys.SocketEvents.Write;
-                            }
-#endif
-
+#if false
                             if (events != Interop.Sys.SocketEvents.None)
                             {
                                 _eventQueue.Enqueue(new SocketIOEvent(context, events));
                                 enqueuedEvent = true;
                             }
+#endif
                         }
                     }
                 }

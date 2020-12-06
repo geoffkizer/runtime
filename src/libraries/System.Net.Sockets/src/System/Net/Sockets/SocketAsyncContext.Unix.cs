@@ -347,6 +347,8 @@ namespace System.Net.Sockets
         private struct OperationQueue<TOperation>
             where TOperation : AsyncOperation
         {
+            // The ultimate goal here is to get rid of QueueState and the lock and sequence number.
+
             // This is new stuff:
             public SemaphoreSlim _semaphore;
             // TODO: This is not getting disposed currently.
@@ -513,7 +515,7 @@ namespace System.Net.Sockets
 
             // Note, I changed the default of processAsyncEvents to false.
             // I believe this is more correct, but it's still a change in behavior...
-            public AsyncOperation? ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
+            public void ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
             {
                 // This path is hacked out for now
                 Debug.Assert(!processAsyncEvents);
@@ -529,22 +531,13 @@ namespace System.Net.Sockets
                             Debug.Assert(_tail == null, "State == Ready but queue is not empty!");
                             _sequenceNumber++;
                             Trace(context, $"Exit (previously ready)");
-                            return null;
+                            return;
 
                         case QueueState.Waiting:
                             Debug.Assert(_tail != null, "State == Waiting but queue is empty!");
                             op = _tail;
 
-#if false
-                            Debug.Assert(_isNextOperationSynchronous == (op.Event != null));
-                            if (skipAsyncEvents && !_isNextOperationSynchronous)
-                            {
-                                Debug.Assert(!processAsyncEvents);
-                                // Return the operation to indicate that the async operation was not processed, without making
-                                // any state changes because async operations are being skipped
-                                return op;
-                            }
-#endif
+                            // NOTE: We are always processing the op right now. See below.
 
                             _state = QueueState.Processing;
                             // Break out and release lock
@@ -554,16 +547,16 @@ namespace System.Net.Sockets
                             Debug.Assert(_tail != null, "State == Processing but queue is empty!");
                             _sequenceNumber++;
                             Trace(context, $"Exit (currently processing)");
-                            return null;
+                            return;
 
                         case QueueState.Stopped:
                             Debug.Assert(_tail == null);
                             Trace(context, $"Exit (stopped)");
-                            return null;
+                            return;
 
                         default:
                             Environment.FailFast("unexpected queue state");
-                            return null;
+                            return;
                     }
                 }
 
@@ -573,25 +566,14 @@ namespace System.Net.Sockets
                 {
                     // Sync operation.  Signal waiting thread to continue processing.
                     e.Set();
-                    return null;
                 }
                 else if (tcs is not null)
                 {
                     tcs.TrySetResult(false);
-                    return null;
                 }
                 else
                 {
                     Debug.Assert(false);
-
-                    // Async operation.  The caller will figure out how to process the IO.
-                    Debug.Assert(!skipAsyncEvents);
-                    if (processAsyncEvents)
-                    {
-                        op.Process();
-                        return null;
-                    }
-                    return op;
                 }
             }
 
@@ -2206,10 +2188,13 @@ namespace System.Net.Sockets
         // be scheduled instead. It's not functionally incorrect to schedule the release of a synchronous operation, just it may
         // lead to thread pool starvation issues if the synchronous operations are blocking thread pool threads (typically not
         // advised) and more threads are not immediately available to run work items that would release those operations.
+
+        // Ignore above comment.
+
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Interop.Sys.SocketEvents HandleSyncEventsSpeculatively(Interop.Sys.SocketEvents events)
+        public void HandleEventsOnEpollThread(Interop.Sys.SocketEvents events)
         {
-        // NOTE: I moved this code up to caller. it's not necessary here anymore, and shouldn't really have been here in the first place.
             if ((events & Interop.Sys.SocketEvents.Error) != 0)
             {
                 // Set the Read and Write flags; the processing for these events
@@ -2218,23 +2203,16 @@ namespace System.Net.Sockets
                 events |= Interop.Sys.SocketEvents.Read | Interop.Sys.SocketEvents.Write;
             }
 
-            if ((events & Interop.Sys.SocketEvents.Read) != 0 &&
-//                _receiveQueue.IsNextOperationSynchronous_Speculative &&
-                _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this, skipAsyncEvents: true) == null)
+            if ((events & Interop.Sys.SocketEvents.Read) != 0)
             {
-                events ^= Interop.Sys.SocketEvents.Read;
+                _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this);
             }
 
-            if ((events & Interop.Sys.SocketEvents.Write) != 0 &&
-//                _sendQueue.IsNextOperationSynchronous_Speculative &&
-                _sendQueue.ProcessSyncEventOrGetAsyncEvent(this, skipAsyncEvents: true) == null)
+            if ((events & Interop.Sys.SocketEvents.Write) != 0)
             {
-                events ^= Interop.Sys.SocketEvents.Write;
+                _sendQueue.ProcessSyncEventOrGetAsyncEvent(this);
+
             }
-
-            Debug.Assert(events == 0);
-
-            return events;
         }
 
 #if false
@@ -2261,6 +2239,7 @@ namespace System.Net.Sockets
         }
 #endif
 
+#if false
         // Called on ThreadPool thread.
         public unsafe void HandleEvents(Interop.Sys.SocketEvents events)
         {
@@ -2288,6 +2267,7 @@ namespace System.Net.Sockets
                 sendOperation.Process();
             }
         }
+#endif
 
         //
         // Tracing stuff
