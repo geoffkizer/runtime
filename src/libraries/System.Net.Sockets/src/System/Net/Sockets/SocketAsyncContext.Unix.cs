@@ -40,16 +40,6 @@ namespace System.Net.Sockets
         // As far as I can tell, I really only need this for cancellation handling now, so look at how to get rid of that.
         private abstract class AsyncOperation
         {
-            private enum State
-            {
-                Waiting = 0,
-                Running = 1,
-                Complete = 2,
-                Cancelled = 3
-            }
-
-            private int _state; // Actually AsyncOperation.State.
-
             public readonly SocketAsyncContext AssociatedContext;
             public SocketError ErrorCode;
 
@@ -65,37 +55,21 @@ namespace System.Net.Sockets
             // This is only called from the constructor now, since we don't reuse operations
             public void Reset()
             {
-                _state = (int)State.Waiting;
                 Event = null;
                 CompletionSource = null;
             }
 
             public bool TrySetRunning()
             {
-                State oldState = (State)Interlocked.CompareExchange(ref _state, (int)State.Running, (int)State.Waiting);
-                if (oldState == State.Cancelled)
-                {
-                    // This operation has already been cancelled, and had its completion processed.
-                    // Simply return false to indicate no further processing is needed.
-                    return false;
-                }
-
-                Debug.Assert(oldState == (int)State.Waiting);
                 return true;
             }
 
             public void SetComplete()
             {
-                Debug.Assert(Volatile.Read(ref _state) == (int)State.Running);
-
-                Volatile.Write(ref _state, (int)State.Complete);
             }
 
             public void SetWaiting()
             {
-                Debug.Assert(Volatile.Read(ref _state) == (int)State.Running);
-
-                Volatile.Write(ref _state, (int)State.Waiting);
             }
 
             // This is called two places:
