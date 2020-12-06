@@ -925,7 +925,7 @@ namespace System.Net.Sockets
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
 
                             state.Cleanup();
-                            return (false, state._operation.ErrorCode, state);
+                            return (false, SocketError.OperationAborted, state);
                         }
 
                         if (retry)
@@ -946,7 +946,7 @@ namespace System.Net.Sockets
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned cancelled, return false");
 
                             state.Cleanup();
-                            return (false, state._operation.ErrorCode, state);
+                            return (false, SocketError.OperationAborted, state);
                         }
 
                         if (retry)
@@ -978,7 +978,7 @@ namespace System.Net.Sockets
                         Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
 
                         state.Cleanup();
-                        return (false, state._operation.ErrorCode, state);
+                        return (false, SocketError.OperationAborted, state);
                     }
 
                     Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
