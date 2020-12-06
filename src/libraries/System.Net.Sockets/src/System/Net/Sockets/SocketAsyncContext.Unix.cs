@@ -655,8 +655,9 @@ namespace System.Net.Sockets
                     if (_tail != null)
                     {
                         AsyncOperation op = _tail;
+                        aborted |= op.TryCancel();
 
-                        op.Signal();
+                        // Test
                         aborted = true;
                     }
 
