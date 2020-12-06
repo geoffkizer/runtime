@@ -54,7 +54,6 @@ namespace System.Net.Sockets
 #endif
 
             public readonly SocketAsyncContext AssociatedContext;
-            public AsyncOperation Next = null!; // initialized by helper called from ctor
             public SocketError ErrorCode;
             public CancellationTokenRegistration CancellationRegistration;
 
@@ -72,7 +71,6 @@ namespace System.Net.Sockets
                 _state = (int)State.Waiting;
                 Event = null;
                 CompletionSource = null;
-                Next = this;
 #if DEBUG
                 _callbackQueued = 0;
 #endif
@@ -584,20 +582,10 @@ namespace System.Net.Sockets
                         case QueueState.Waiting:
                         case QueueState.Processing:
                             // Enqueue the operation.
-                            Debug.Assert(operation.Next == operation, "Expected operation.Next == operation");
+                            Debug.Assert(_tail == null);
 
-                            if (_tail == null)
-                            {
-                                Debug.Assert(!_isNextOperationSynchronous);
-                                _isNextOperationSynchronous = operation.Event != null;
-                            }
-                            else
-                            {
-                                Debug.Fail("list is not empty");
-
-                                operation.Next = _tail.Next;
-                                _tail.Next = operation;
-                            }
+                            Debug.Assert(!_isNextOperationSynchronous);
+                            _isNextOperationSynchronous = operation.Event != null;
 
                             _tail = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
@@ -657,7 +645,7 @@ namespace System.Net.Sockets
 
                         case QueueState.Waiting:
                             Debug.Assert(_tail != null, "State == Waiting but queue is empty!");
-                            op = _tail.Next;
+                            op = _tail;
                             Debug.Assert(_isNextOperationSynchronous == (op.Event != null));
                             if (skipAsyncEvents && !_isNextOperationSynchronous)
                             {
@@ -813,7 +801,6 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
                         Debug.Assert(_tail != null, "Unexpected empty queue while processing I/O");
-                        Debug.Assert(op == _tail.Next, "Operation is not at head of queue???");
                         observedSequenceNumber = _sequenceNumber;
                     }
                 }
@@ -886,8 +873,6 @@ namespace System.Net.Sockets
 
             public void RemoveQueuedOperation(TOperation op)
             {
-                // Remove the op from the queue and see if there's more to process.
-                AsyncOperation? nextOp = null;
                 using (Lock())
                 {
                     if (_state == QueueState.Stopped)
@@ -898,29 +883,17 @@ namespace System.Net.Sockets
                     else
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                        Debug.Assert(_tail!.Next == op, "Queue modified while processing queue");
 
-                        if (op == _tail)
-                        {
-                            // No more operations to process
-                            _tail = null;
-                            _isNextOperationSynchronous = false;
-                            _state = QueueState.Ready;
-                            _sequenceNumber++;
-                            Trace(op.AssociatedContext, $"Exit (finished queue)");
-                        }
-                        else
-                        {
-                            // Pop current operation and advance to next
-                            nextOp = _tail.Next = op.Next;
-                            _isNextOperationSynchronous = nextOp.Event != null;
-                        }
+                        Debug.Assert(op == _tail);
+
+                        // No more operations to process
+                        _tail = null;
+                        _isNextOperationSynchronous = false;
+                        _state = QueueState.Ready;
+                        _sequenceNumber++;
+                        Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
                 }
-
-                Debug.Assert(nextOp == null, $"RemoveQueuedOperation: nextOp is not null");
-
-                nextOp?.Dispatch();
             }
 
             public void CancelAndContinueProcessing(TOperation op)
@@ -930,7 +903,6 @@ namespace System.Net.Sockets
 
                 // Remove operation from queue.
                 // Note it must be there since it can only be processed and removed by the caller.
-                AsyncOperation? nextOp = null;
                 using (Lock())
                 {
                     if (_state == QueueState.Stopped)
@@ -941,68 +913,25 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_tail != null, "Unexpected empty queue in CancelAndContinueProcessing");
 
-                        if (_tail.Next == op)
-                        {
-                            // We're the head of the queue
-                            if (op == _tail)
-                            {
-                                // No more operations
-                                _tail = null;
-                                _isNextOperationSynchronous = false;
-                            }
-                            else
-                            {
-                                // Pop current operation and advance to next
-                                _tail.Next = op.Next;
-                                _isNextOperationSynchronous = op.Next.Event != null;
-                            }
+                        Debug.Assert(op == _tail);
 
-                            // We're the first op in the queue.
-                            if (_state == QueueState.Processing)
-                            {
-                                // The queue has already handed off execution responsibility to us.
-                                // We need to dispatch to the next op.
-                                if (_tail == null)
-                                {
-                                    _state = QueueState.Ready;
-                                    _sequenceNumber++;
-                                }
-                                else
-                                {
-                                    nextOp = _tail.Next;
-                                }
-                            }
-                            else if (_state == QueueState.Waiting)
-                            {
-                                if (_tail == null)
-                                {
-                                    _state = QueueState.Ready;
-                                    _sequenceNumber++;
-                                }
-                            }
+                        // No more operations
+                        _tail = null;
+                        _isNextOperationSynchronous = false;
+
+                        // We're the first op in the queue.
+                        if (_state == QueueState.Processing)
+                        {
+                            _state = QueueState.Ready;
+                            _sequenceNumber++;
                         }
-                        else
+                        else if (_state == QueueState.Waiting)
                         {
-                            // We're not the head of the queue.
-                            // Just find this op and remove it.
-                            AsyncOperation current = _tail.Next;
-                            while (current.Next != op)
-                            {
-                                current = current.Next;
-                            }
-
-                            if (current.Next == _tail)
-                            {
-                                _tail = current;
-                            }
-                            current.Next = current.Next.Next;
+                            _state = QueueState.Ready;
+                            _sequenceNumber++;
                         }
                     }
                 }
-
-                Debug.Assert(nextOp == null, $"CancelAndContinueProcessing: nextOp is not null");
-
-                nextOp?.Dispatch();
             }
 
             // Called when the socket is closed.
@@ -1024,14 +953,8 @@ namespace System.Net.Sockets
                     if (_tail != null)
                     {
                         AsyncOperation op = _tail;
-                        do
-                        {
-                            aborted |= op.TryCancel();
-                            op = op.Next;
 
-                            Debug.Assert(op == _tail, "StopAndAbort: unexpected queue");
-
-                        } while (op != _tail);
+                        aborted |= op.TryCancel();
                     }
 
                     _tail = null;
