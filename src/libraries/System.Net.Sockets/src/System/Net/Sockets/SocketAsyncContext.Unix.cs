@@ -45,8 +45,8 @@ namespace System.Net.Sockets
         private AcceptOperation? _cachedAcceptOperation;
 //        private BufferMemoryReceiveOperation? _cachedBufferMemoryReceiveOperation;
 //        private BufferListReceiveOperation? _cachedBufferListReceiveOperation;
-        private BufferMemorySendOperation? _cachedBufferMemorySendOperation;
-        private BufferListSendOperation? _cachedBufferListSendOperation;
+//        private BufferMemorySendOperation? _cachedBufferMemorySendOperation;
+//        private BufferListSendOperation? _cachedBufferListSendOperation;
 
         private void ReturnOperation(AcceptOperation operation)
         {
@@ -76,6 +76,7 @@ namespace System.Net.Sockets
         }
 #endif
 
+#if false
         private void ReturnOperation(BufferMemorySendOperation operation)
         {
             operation.Reset();
@@ -93,6 +94,7 @@ namespace System.Net.Sockets
             operation.SocketAddress = null;
             Volatile.Write(ref _cachedBufferListSendOperation, operation); // benign race condition
         }
+#endif
 
         private AcceptOperation RentAcceptOperation() =>
             Interlocked.Exchange(ref _cachedAcceptOperation, null) ??
@@ -108,6 +110,7 @@ namespace System.Net.Sockets
             new BufferListReceiveOperation(this);
 #endif
 
+#if false
         private BufferMemorySendOperation RentBufferMemorySendOperation() =>
             Interlocked.Exchange(ref _cachedBufferMemorySendOperation, null) ??
             new BufferMemorySendOperation(this);
@@ -115,6 +118,7 @@ namespace System.Net.Sockets
         private BufferListSendOperation RentBufferListSendOperation() =>
             Interlocked.Exchange(ref _cachedBufferListSendOperation, null) ??
             new BufferListSendOperation(this);
+#endif
 
         private abstract class AsyncOperation : IThreadPoolWorkItem
         {
@@ -381,6 +385,7 @@ namespace System.Net.Sockets
             public sealed override ref OperationQueue<WriteOperation> OperationQueue => ref AssociatedContext._sendQueue;
         }
 
+#if false
         private abstract class SendOperation : WriteOperation
         {
             public SocketFlags Flags;
@@ -455,6 +460,7 @@ namespace System.Net.Sockets
                 cb(bt, sa, sal, SocketFlags.None, ec);
             }
         }
+#endif
 
 #if false
         private abstract class ReceiveOperation : ReadOperation
@@ -537,6 +543,7 @@ namespace System.Net.Sockets
                 Debug.Assert(false);
                 return true;
             }
+
             protected sealed override void Abort() { }
 
             public override void InvokeCallback(bool allowPooling)
@@ -545,7 +552,7 @@ namespace System.Net.Sockets
             }
         }
 
-        private sealed class DumbSyncSendOperation : SendOperation
+        private sealed class DumbSyncSendOperation : WriteOperation
         {
             public DumbSyncSendOperation(SocketAsyncContext context) : base(context) { }
 
@@ -554,6 +561,8 @@ namespace System.Net.Sockets
                 Debug.Assert(false);
                 return true;
             }
+
+            protected sealed override void Abort() { }
 
             public override void InvokeCallback(bool allowPooling)
             {
@@ -2511,41 +2520,61 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError SendToAsync(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesSent, Action<int, byte[]?, int, SocketFlags, SocketError> callback)
+        private async ValueTask<(SocketError socketError, int bytesSent, int socketAddressLen)> InternalSendToAsync(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, int socketAddressLen, CancellationToken cancellationToken)
         {
             SetNonBlocking();
 
-            bytesSent = 0;
+            SocketError errorCode;
+
+            int bytesSent = 0;
             int bufferIndex = 0;
             int offset = 0;
-            SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+
+            var state = CreateAsyncWriteOperationState(cancellationToken);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode, state) = await WaitForWriteAsyncRetry(state).ConfigureAwait(false);
+                if (!retry)
+                {
+                    return (errorCode, default, default);
+                }
+
+                if (SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return (errorCode, bytesSent, socketAddressLen);
+                }
             }
+        }
 
-            BufferListSendOperation operation = RentBufferListSendOperation();
-            operation.Callback = callback;
-            operation.Buffers = buffers;
-            operation.BufferIndex = bufferIndex;
-            operation.Offset = offset;
-            operation.Flags = flags;
-            operation.SocketAddress = socketAddress;
-            operation.SocketAddressLen = socketAddressLen;
-            operation.BytesTransferred = bytesSent;
+        public SocketError SendToAsync(IList<ArraySegment<byte>> buffers, SocketFlags flags, byte[]? socketAddress, ref int socketAddressLen, out int bytesSent, Action<int, byte[]?, int, SocketFlags, SocketError> callback)
+        {
+            ValueTask<(SocketError socketError, int bytesReceived, int socketAddressLen)> vt = InternalSendToAsync(buffers, flags, socketAddress, socketAddressLen, CancellationToken.None);
+            bool completedSynchronously = vt.IsCompleted;
 
-            if (!_sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber))
+            if (completedSynchronously)
             {
-                bytesSent = operation.BytesTransferred;
-                errorCode = operation.ErrorCode;
-
-                ReturnOperation(operation);
-                return errorCode;
+                SocketError socketError;
+                (socketError, bytesSent, socketAddressLen) = vt.GetAwaiter().GetResult();
+                return socketError;
             }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    Debug.Assert(vt.IsCompleted);
 
-            return SocketError.IOPending;
+                    SocketError socketError;
+                    int bytesSent;
+                    int socketAddressLen;
+                    (socketError, bytesSent, socketAddressLen) = vt.GetAwaiter().GetResult();
+                    callback(bytesSent, socketAddress, socketAddressLen, SocketFlags.None, socketError);
+                });
+
+                bytesSent = default;
+                return SocketError.IOPending;
+            }
         }
 
         public SocketError SendFile(SafeFileHandle fileHandle, long offset, long count, int timeout, out long bytesSent)
@@ -2571,35 +2600,58 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError SendFileAsync(SafeFileHandle fileHandle, long offset, long count, out long bytesSent, Action<long, SocketError> callback)
+        private async ValueTask<(SocketError socketError, long bytesSent)> InternalSendFileAsync(SafeFileHandle fileHandle, long offset, long count, CancellationToken cancellationToken)
         {
             SetNonBlocking();
 
-            bytesSent = 0;
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_sendQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteSendFile(_socket, fileHandle, ref offset, ref count, ref bytesSent, out errorCode))
+
+            long bytesSent = 0;
+
+            var state = CreateAsyncWriteOperationState(cancellationToken);
+            while (true)
             {
-                return errorCode;
+                bool retry;
+                (retry, errorCode, state) = await WaitForWriteAsyncRetry(state).ConfigureAwait(false);
+                if (!retry)
+                {
+                    return (errorCode, default);
+                }
+
+                if (SocketPal.TryCompleteSendFile(_socket, fileHandle, ref offset, ref count, ref bytesSent, out errorCode))
+                {
+                    state.Complete();
+                    return (errorCode, bytesSent);
+                }
             }
+        }
 
-            var operation = new SendFileOperation(this)
-            {
-                Callback = callback,
-                FileHandle = fileHandle,
-                Offset = offset,
-                Count = count,
-                BytesTransferred = bytesSent
-            };
+        public SocketError SendFileAsync(SafeFileHandle fileHandle, long offset, long count, out long bytesSent, Action<long, SocketError> callback)
+        {
+            ValueTask<(SocketError socketError, long bytesSent)> vt = InternalSendFileAsync(fileHandle, offset, count, CancellationToken.None);
+            bool completedSynchronously = vt.IsCompleted;
 
-            if (!_sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber))
+            if (completedSynchronously)
             {
-                bytesSent = operation.BytesTransferred;
-                return operation.ErrorCode;
+                SocketError socketError;
+                (socketError, bytesSent) = vt.GetAwaiter().GetResult();
+                return socketError;
             }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    Debug.Assert(vt.IsCompleted);
 
-            return SocketError.IOPending;
+                    SocketError socketError;
+                    long bytesSent;
+                    (socketError, bytesSent) = vt.GetAwaiter().GetResult();
+                    callback(bytesSent, socketError);
+                });
+
+                bytesSent = default;
+                return SocketError.IOPending;
+            }
         }
 
         // Called on the epoll thread, speculatively tries to process synchronous events and errors for synchronous events, and
