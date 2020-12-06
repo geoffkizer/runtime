@@ -253,13 +253,14 @@ namespace System.Net.Sockets
                     context.Register();
                 }
 
-                bool doAbort = false;
                 using (Lock())
                 {
                     if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
-                        doAbort = true;
+                        operation.DoAbort();
+                        Trace(context, $"Leave, queue stopped");
+                        return (aborted: true, retry: false);
                     }
 
                     switch (_state)
@@ -298,12 +299,6 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (doAbort)
-                {
-                    operation.DoAbort();
-                    Trace(context, $"Leave, queue stopped");
-                    return (aborted: true, retry: false);
-                }
 
                 // Tell the caller to retry the operation.
                 Trace(context, $"Leave, signal retry");
@@ -378,9 +373,8 @@ namespace System.Net.Sockets
                     Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
                     Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
                     _dataAvailable = false;
+                    return false;
                 }
-
-                return false;
             }
 
             public void CompleteQueuedOperation(TOperation op)
@@ -408,6 +402,7 @@ namespace System.Net.Sockets
                     if (_dataAvailable)
                     {
                         _dataAvailable = false;
+                        return (false, true);
                     }
                     else
                     {
@@ -416,8 +411,6 @@ namespace System.Net.Sockets
                         return (false, false);
                     }
                 }
-
-                return (false, true);
             }
 
             public void RemoveQueuedOperation(TOperation op)
