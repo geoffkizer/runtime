@@ -57,7 +57,7 @@ namespace System.Net.Sockets
             public void TryCancel()
             {
                 DoAbort();
-                Signal(true);
+                Signal(false);
             }
 
             // TODO: I don't think I should need to explicitly pass [cancel] here.
