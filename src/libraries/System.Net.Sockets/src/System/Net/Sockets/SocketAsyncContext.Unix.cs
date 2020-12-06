@@ -1937,9 +1937,12 @@ namespace System.Net.Sockets
                         return errorCode;
                     }
                 }
-                catch (Exception e)
+                catch
                 {
-                    Debug.Fail($"Caught exception: {e}");
+                    // We are throwing an ArgumentNullException way down in SocketPal.SysReceive, validating the supplied buffers
+                    // I don't really think this worked properly before, but handle it here for now.
+                    state.Complete();
+                    throw;
                 }
             }
         }
@@ -2216,10 +2219,19 @@ namespace System.Net.Sockets
                     return errorCode;
                 }
 
-                if (SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                try
                 {
+                    if (SocketPal.TryCompleteSendTo(_socket, buffers, ref bufferIndex, ref offset, flags, socketAddress, socketAddressLen, ref bytesSent, out errorCode))
+                    {
+                        state.Complete();
+                        return errorCode;
+                    }
+                }
+                catch
+                {
+                    // See ReceiveFrom above
                     state.Complete();
-                    return errorCode;
+                    throw;
                 }
             }
         }
