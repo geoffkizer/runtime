@@ -457,102 +457,12 @@ namespace System.Net.Sockets
                 return isReady;
             }
 
-#if false
-            // Return true for pending, false for completed synchronously (including failure and abort)
-            public bool StartAsyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
-            {
-                Trace(context, $"Enter");
-
-                if (!context.IsRegistered)
-                {
-                    context.Register();
-                }
-
-                while (true)
-                {
-                    bool doAbort = false;
-                    using (Lock())
-                    {
-                        switch (_state)
-                        {
-                            case QueueState.Ready:
-                                if (observedSequenceNumber != _sequenceNumber)
-                                {
-                                    // The queue has become ready again since we previously checked it.
-                                    // So, we need to retry the operation before we enqueue it.
-                                    Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
-                                    observedSequenceNumber = _sequenceNumber;
-                                    break;
-                                }
-
-                                // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                                _state = QueueState.Waiting;
-                                goto case QueueState.Waiting;
-
-                            case QueueState.Waiting:
-                            case QueueState.Processing:
-                                // Enqueue the operation.
-                                Debug.Assert(operation.Next == operation, "Expected operation.Next == operation");
-
-                                if (_tail == null)
-                                {
-                                    Debug.Assert(!_isNextOperationSynchronous);
-                                    _isNextOperationSynchronous = operation.Event != null;
-                                }
-                                else
-                                {
-                                    Debug.Fail("list is not empty");
-
-                                    operation.Next = _tail.Next;
-                                    _tail.Next = operation;
-                                }
-
-                                _tail = operation;
-                                Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                                // Now that the object is enqueued, hook up cancellation.
-                                // Note that it's possible the call to register itself could
-                                // call TryCancel, so we do this after the op is fully enqueued.
-                                if (cancellationToken.CanBeCanceled)
-                                {
-                                    operation.CancellationRegistration = cancellationToken.UnsafeRegister(s => ((TOperation)s!).TryCancel(), operation);
-                                }
-
-                                return true;
-
-                            case QueueState.Stopped:
-                                Debug.Assert(_tail == null);
-                                doAbort = true;
-                                break;
-
-                            default:
-                                Environment.FailFast("unexpected queue state");
-                                break;
-                        }
-                    }
-
-                    if (doAbort)
-                    {
-                        operation.DoAbort();
-                        Trace(context, $"Leave, queue stopped");
-                        return false;
-                    }
-
-                    // Retry the operation.
-                    if (operation.TryComplete(context))
-                    {
-                        Trace(context, $"Leave, retry succeeded");
-                        return false;
-                    }
-                }
-            }
-#endif
-
             // TODO: This is a modified version of above for sync operations.
             // It doesn't actually invoke the operation....
             // Returns aborted: true if the op was aborted due to queue being stopped
             // Returns retry: true if we need to retry due to updated seq number
             // Returns retry: false if we enqueued and will be signalled later.
+            // NOTE: Using this for async ops now too....
             public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
             {
                 Trace(context, $"Enter");
