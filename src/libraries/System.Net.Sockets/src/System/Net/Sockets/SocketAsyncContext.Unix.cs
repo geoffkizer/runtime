@@ -168,9 +168,6 @@ namespace System.Net.Sockets
                                     // Queue must be empty.
                 Waiting = 1,        // Indicates that data is definitely not available on the socket.
                                     // Queue must not be empty.
-                Processing = 2,     // Indicates that a thread pool item has been scheduled (and may
-                                    // be executing) to process the IO operations in the queue.
-                                    // Queue must not be empty.
             }
 
             // These fields define the queue state.
@@ -276,12 +273,6 @@ namespace System.Net.Sockets
 
                             return (aborted: false, retry: false);
 
-                        case QueueState.Processing:
-                            // We should never be processing when a new operation arrives.
-                            // The semaphore should guarantee mutual exclusion in that regard.
-                            Debug.Assert(false);
-                            return (true, false);
-
                         default:
                             Environment.FailFast("unexpected queue state");
                             return (true, false);
@@ -328,12 +319,6 @@ namespace System.Net.Sockets
 
                             // Break out and release lock
                             break;
-
-                        case QueueState.Processing:
-                            Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
-                            _dataAvailable = true;
-                            Trace(context, $"Exit (currently processing)");
-                            return;
 
                         default:
                             Environment.FailFast("unexpected queue state");
