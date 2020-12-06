@@ -656,7 +656,8 @@ namespace System.Net.Sockets
                     {
                         AsyncOperation op = _tail;
 
-                        aborted |= op.TryCancel();
+                        // I'm no longer setting aborted. Do I care?
+                        op.Signal();
                     }
 
                     _tail = null;
