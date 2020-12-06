@@ -268,7 +268,6 @@ namespace System.Net.Sockets
                 // This path is hacked out for now
                 Debug.Assert(!processAsyncEvents);
 
-                AsyncOperation op;
                 using (Lock())
                 {
                     Trace(context, $"Enter");
@@ -279,30 +278,12 @@ namespace System.Net.Sockets
                         return;
                     }
 
-                    if (_isReady)
+                    _dataAvailable = true;
+                    if (_currentOperation is not null)
                     {
-                        Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
-                        _dataAvailable = true;
-                        Trace(context, $"Exit (previously ready)");
-                        return;
-                    }
-                    else
-                    {
-                        Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
-                        op = _currentOperation;
-
-                        // NOTE: We are always processing the op right now. See below.
-
-                        _dataAvailable = true;
-
-                        // We used to transition to Processing here, but don't do that anymore.
-                        //_state = QueueState.Processing;
-
-                        // Break out and release lock
+                        _currentOperation.Signal();
                     }
                 }
-
-                op.Signal();
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
