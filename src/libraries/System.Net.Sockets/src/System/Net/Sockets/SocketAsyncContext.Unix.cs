@@ -248,6 +248,8 @@ namespace System.Net.Sockets
                         return (aborted: true, retry: false);
                     }
 
+                    Debug.Assert(_state != QueueState.Waiting);
+
                     switch (_state)
                     {
                         case QueueState.Ready:
@@ -379,7 +381,6 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        _state = QueueState.Waiting;
                         Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
                         return (false, false);
                     }
