@@ -273,20 +273,18 @@ namespace System.Net.Sockets
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
-            public bool GetQueuedOperationStatus(TOperation op)
+            public bool GetQueuedOperationStatus()
             {
                 using (Lock())
                 {
-                    Trace(op.AssociatedContext, $"Enter");
+                    Debug.Assert(_currentOperation == null);
 
                     if (_stopped)
                     {
-                        Debug.Assert(_currentOperation == null);
-                        Trace(op.AssociatedContext, $"Exit (stopped)");
                         return true;
                     }
 
-                    Debug.Assert(_currentOperation == null);
+                    // Reset _dataAvailable for subsequent attempts
                     _dataAvailable = false;
                     return false;
                 }
@@ -727,7 +725,7 @@ namespace System.Net.Sockets
                 }
 
                 // We've been signalled to try to process the operation.
-                cancelled = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
+                cancelled = _operation.OperationQueue.GetQueuedOperationStatus();
                 if (cancelled)
                 {
                     Cleanup();
@@ -845,7 +843,7 @@ namespace System.Net.Sockets
                     }
 
                     // We've been signalled to try to process the operation.
-                    cancelled = state._operation.OperationQueue.GetQueuedOperationStatus(state._operation);
+                    cancelled = state._operation.OperationQueue.GetQueuedOperationStatus();
                     if (cancelled)
                     {
                         Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
