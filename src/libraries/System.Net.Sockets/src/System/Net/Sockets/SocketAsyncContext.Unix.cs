@@ -188,16 +188,12 @@ namespace System.Net.Sockets
             }
 
             // IsReady returns whether an operation can be executed immediately.
-            // observedSequenceNumber must be passed to StartAsyncOperation.
+            // To be clear, this always returns true, but it also resets _dataAvailable so we can check it later on.
             public bool IsReady(SocketAsyncContext context)
             {
+                // We don't care if it's stopped.
                 using (Lock())
                 {
-                    if (_stopped)
-                    {
-                        return true;
-                    }
-
                     // We always return true from this.
                     // The semaphore will enforce serialization of operations.
                     _dataAvailable = false;
