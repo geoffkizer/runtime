@@ -178,26 +178,14 @@ namespace System.Net.Sockets
             // If we successfully process all enqueued operations, then the state becomes Ready;
             // otherwise, the state becomes Waiting and we wait for another epoll notification.
 
-            private enum QueueState : int
-            {
-                Ready = 0,          // Indicates that data MAY be available on the socket.
-                                    // Queue must be empty.
-                Waiting = 1,        // Indicates that data is definitely not available on the socket.
-                                    // Queue must not be empty.
-                Processing = 2,     // Indicates that a thread pool item has been scheduled (and may
-                                    // be executing) to process the IO operations in the queue.
-                                    // Queue must not be empty.
-                Stopped = 3,        // Indicates that the queue has been stopped because the
-                                    // socket has been closed.
-                                    // Queue must be empty.
-            }
+            // TODO: Above is wrong now
 
             // These fields define the queue state.
 
-            private QueueState _state;      // See above
-
             // This replaces the old sequence number.
             private bool _dataAvailable;
+
+            private bool _stopped;
 
             private AsyncOperation? _currentOperation;
 
@@ -213,8 +201,8 @@ namespace System.Net.Sockets
                 Debug.Assert(_queueLock == null);
                 _queueLock = new object();
 
-                _state = QueueState.Ready;
-                _dataAvailable = false;
+                _dataAvailable = true;
+                _stopped = false;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
@@ -223,18 +211,17 @@ namespace System.Net.Sockets
             // observedSequenceNumber must be passed to StartAsyncOperation.
             public bool IsReady(SocketAsyncContext context)
             {
-                Debug.Assert(sizeof(QueueState) == sizeof(int));
-
                 using (Lock())
                 {
-                    QueueState state = _state;
+                    if (_stopped)
+                    {
+                        // Caller will handle
+                        return true;
+                    }
+
+                    bool dataAvailable = _dataAvailable;
                     _dataAvailable = false;
-
-                    bool isReady = state == QueueState.Ready || state == QueueState.Stopped;
-
-                    Trace(context, $"{isReady}");
-
-                    return isReady;
+                    return dataAvailable;
                 }
             }
 
@@ -254,60 +241,28 @@ namespace System.Net.Sockets
                     context.Register();
                 }
 
-                bool doAbort = false;
                 using (Lock())
                 {
-                    switch (_state)
+                    if (_stopped)
                     {
-                        case QueueState.Ready:
-                            if (_dataAvailable)
-                            {
-                                // The queue has become ready again since we previously checked it.
-                                // So, we need to retry the operation before we enqueue it.
-                                _dataAvailable = false;
-                                break;
-                            }
+                        Debug.Assert(_currentOperation == null);
+                        operation.DoAbort();
+                        return (aborted: true, retry: false);
+                    }
+                    else
+                    {
+                        if (_dataAvailable)
+                        {
+                            // Caller should retry
+                            _dataAvailable = false;
+                            return (aborted: false, retry: true);
+                        }
 
-                            // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                            _state = QueueState.Waiting;
-                            goto case QueueState.Waiting;
-
-                        case QueueState.Waiting:
-                            // Enqueue the operation.
-                            Debug.Assert(_currentOperation == null);
-
-                            _currentOperation = operation;
-                            Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                            return (aborted: false, retry: false);
-
-                        case QueueState.Processing:
-                            // We should never be processing when a new operation arrives.
-                            // The semaphore should guarantee mutual exclusion in that regard.
-                            Debug.Assert(false);
-                            break;
-
-                        case QueueState.Stopped:
-                            Debug.Assert(_currentOperation == null);
-                            doAbort = true;
-                            break;
-
-                        default:
-                            Environment.FailFast("unexpected queue state");
-                            break;
+                        // Register operation for notification
+                        _currentOperation = operation;
+                        return (aborted: false, retry: false);
                     }
                 }
-
-                if (doAbort)
-                {
-                    operation.DoAbort();
-                    Trace(context, $"Leave, queue stopped");
-                    return (aborted: true, retry: false);
-                }
-
-                // Tell the caller to retry the operation.
-                Trace(context, $"Leave, signal retry");
-                return (aborted: false, retry: true);
             }
 
             // Note, I changed the default of processAsyncEvents to false.
@@ -317,47 +272,33 @@ namespace System.Net.Sockets
                 // This path is hacked out for now
                 Debug.Assert(!processAsyncEvents);
 
-                AsyncOperation op;
                 using (Lock())
                 {
                     Trace(context, $"Enter");
 
-                    switch (_state)
+                    if (_stopped)
                     {
-                        case QueueState.Ready:
-                            Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
+                        Debug.Assert(_currentOperation == null);
+                        return;
+                    }
+
+                    if (!_dataAvailable)
+                    {
+                        if (_currentOperation is not null)
+                        {
+                            _currentOperation.Signal();
+                            _currentOperation = null;
+                        }
+                        else
+                        {
                             _dataAvailable = true;
-                            Trace(context, $"Exit (previously ready)");
-                            return;
-
-                        case QueueState.Waiting:
-                            Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
-                            op = _currentOperation;
-
-                            // NOTE: We are always processing the op right now. See below.
-
-                            _state = QueueState.Processing;
-                            // Break out and release lock
-                            break;
-
-                        case QueueState.Processing:
-                            Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
-                            _dataAvailable = true;
-                            Trace(context, $"Exit (currently processing)");
-                            return;
-
-                        case QueueState.Stopped:
-                            Debug.Assert(_currentOperation == null);
-                            Trace(context, $"Exit (stopped)");
-                            return;
-
-                        default:
-                            Environment.FailFast("unexpected queue state");
-                            return;
+                        }
+                    }
+                    else
+                    {
+                        Debug.Assert(_currentOperation == null);
                     }
                 }
-
-                op.Signal();
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
@@ -367,26 +308,23 @@ namespace System.Net.Sockets
                 {
                     Trace(op.AssociatedContext, $"Enter");
 
-                    if (_state == QueueState.Stopped)
+                    if (_stopped)
                     {
-                        Debug.Assert(_currentOperation == null);
-                        Trace(op.AssociatedContext, $"Exit (stopped)");
                         return true;
                     }
-                    else
-                    {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                        Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
-                        _dataAvailable = false;
-                    }
-                }
 
-                return false;
+                    Debug.Assert(_currentOperation == null);
+                    return false;
+                }
             }
 
             public void CompleteQueuedOperation(TOperation op)
             {
-                RemoveQueuedOperation(op);
+                Debug.Assert(_currentOperation == null);
+
+                // TODO: What happens here?
+
+                //RemoveQueuedOperation(op);
             }
 
             // We tried the op and it didn't complete.
@@ -397,32 +335,27 @@ namespace System.Net.Sockets
 
                 using (Lock())
                 {
-                    if (_state == QueueState.Stopped)
+                    Debug.Assert(_currentOperation == null);
+
+                    if (_stopped)
                     {
-                        Debug.Assert(_currentOperation == null);
-                        Trace(op.AssociatedContext, $"Exit (stopped)");
                         return (true, false);
+                    }
+
+                    if (_dataAvailable)
+                    {
+                        _dataAvailable = false;
+                        return (false, true);
                     }
                     else
                     {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-
-                        if (_dataAvailable)
-                        {
-                            _dataAvailable = false;
-                        }
-                        else
-                        {
-                            _state = QueueState.Waiting;
-                            Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
-                            return (false, false);
-                        }
+                        _currentOperation = op;
+                        return (false, false);
                     }
                 }
-
-                return (false, true);
             }
 
+#if false
             public void RemoveQueuedOperation(TOperation op)
             {
                 using (Lock())
@@ -446,6 +379,7 @@ namespace System.Net.Sockets
                     }
                 }
             }
+#endif
 
             public void CancelAndContinueProcessing(TOperation op)
             {
@@ -453,31 +387,15 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    if (_state == QueueState.Stopped)
+                    Debug.Assert(_currentOperation == null);
+
+                    if (_stopped)
                     {
-                        Debug.Assert(_currentOperation == null);
+                        return;
                     }
-                    else
-                    {
-                        Debug.Assert(_currentOperation != null, "Unexpected empty queue in CancelAndContinueProcessing");
 
-                        Debug.Assert(op == _currentOperation);
-
-                        // No more operations
-                        _currentOperation = null;
-
-                        // We're the first op in the queue.
-                        if (_state == QueueState.Processing)
-                        {
-                            _state = QueueState.Ready;
-                            _dataAvailable = true;
-                        }
-                        else if (_state == QueueState.Waiting)
-                        {
-                            _state = QueueState.Ready;
-                            _dataAvailable = true;
-                        }
-                    }
+                    // There may be data available now. Let the next call figure it out.
+                    _dataAvailable = true;
                 }
             }
 
@@ -487,15 +405,15 @@ namespace System.Net.Sockets
                 bool aborted = false;
 
                 // We should be called exactly once, by SafeSocketHandle.
-                Debug.Assert(_state != QueueState.Stopped);
+                Debug.Assert(!_stopped);
 
                 using (Lock())
                 {
                     Trace(context, $"Enter");
 
-                    Debug.Assert(_state != QueueState.Stopped);
+                    Debug.Assert(!_stopped);
 
-                    _state = QueueState.Stopped;
+                    _stopped = true;
 
                     if (_currentOperation != null)
                     {
@@ -522,7 +440,7 @@ namespace System.Net.Sockets
                     typeof(TOperation) == typeof(WriteOperation) ? "send" :
                     "???";
 
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
+                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
             }
         }
 
