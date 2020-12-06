@@ -271,6 +271,7 @@ namespace System.Net.Sockets
                     if (_currentOperation is not null)
                     {
                         _currentOperation.Signal();
+                        _currentOperation = null;
                     }
                 }
             }
@@ -289,7 +290,7 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(_currentOperation == op);
+                    Debug.Assert(_currentOperation == null);
                     _dataAvailable = false;
                     return false;
                 }
@@ -315,7 +316,7 @@ namespace System.Net.Sockets
                         return (true, false);
                     }
 
-                    Debug.Assert(op == _currentOperation);
+                    Debug.Assert(_currentOperation == null);
 
                     if (_dataAvailable)
                     {
@@ -324,6 +325,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
+                        _currentOperation = op;
                         Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
                         return (false, false);
                     }
@@ -341,10 +343,10 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation == op);
+                        Debug.Assert(_currentOperation == null);
 
                         // No more operations to process
-                        _currentOperation = null;
+                        // TODO: Does this make sense? Probably not
                         _dataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
@@ -364,9 +366,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation != null, "Unexpected empty queue in CancelAndContinueProcessing");
-
-                        Debug.Assert(op == _currentOperation);
+                        Debug.Assert(_currentOperation == null);
 
                         // No more operations
                         _currentOperation = null;
