@@ -320,7 +320,7 @@ namespace System.Net.Sockets
                     }
 
                     Debug.Assert(!_isReady);
-                    Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
+                    Debug.Assert(_currentOperation == op);
                     _dataAvailable = false;
                     return false;
                 }
@@ -374,8 +374,7 @@ namespace System.Net.Sockets
                     else
                     {
                         Debug.Assert(!_isReady);
-
-                        Debug.Assert(op == _currentOperation);
+                        Debug.Assert(_currentOperation == op);
 
                         // No more operations to process
                         _currentOperation = null;
