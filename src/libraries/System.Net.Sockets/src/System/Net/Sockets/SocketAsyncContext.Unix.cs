@@ -347,6 +347,7 @@ namespace System.Net.Sockets
                     }
 
                     Debug.Assert(!_isReady);
+                    Debug.Assert(op == _currentOperation);
 
                     if (_dataAvailable)
                     {
