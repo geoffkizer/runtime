@@ -1774,11 +1774,18 @@ namespace System.Net.Sockets
                     return errorCode;
                 }
 
-                if (SocketPal.TryCompleteReceiveFrom(_socket, buffer, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                try
                 {
-                    state.Complete();
-                    flags = receivedFlags;
-                    return errorCode;
+                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffer, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                    {
+                        state.Complete();
+                        flags = receivedFlags;
+                        return errorCode;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.Fail($"Caught exception: {e}");
                 }
             }
         }
@@ -1921,11 +1928,18 @@ namespace System.Net.Sockets
                     return errorCode;
                 }
 
-                if (SocketPal.TryCompleteReceiveFrom(_socket, buffers, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                try
                 {
-                    state.Complete();
-                    flags = receivedFlags;
-                    return errorCode;
+                    if (SocketPal.TryCompleteReceiveFrom(_socket, buffers, flags, socketAddress, ref socketAddressLen, out bytesReceived, out SocketFlags receivedFlags, out errorCode))
+                    {
+                        state.Complete();
+                        flags = receivedFlags;
+                        return errorCode;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.Fail($"Caught exception: {e}");
                 }
             }
         }
