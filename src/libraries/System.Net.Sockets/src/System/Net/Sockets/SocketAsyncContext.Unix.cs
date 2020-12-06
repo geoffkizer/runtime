@@ -458,7 +458,11 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation == null);
+                        // Currenty, cancellation (from either the token or StopAndAbort) seems to leave the _currentOperation set
+                        // That's probably bad, but let's handle it
+                        Debug.Assert(_currentOperation == op);
+
+                        _currentOperation = null;
 
                         // We're the first op in the queue.
                         if (_state == QueueState.Processing)
