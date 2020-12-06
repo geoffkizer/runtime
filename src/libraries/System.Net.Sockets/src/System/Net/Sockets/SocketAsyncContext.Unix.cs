@@ -52,7 +52,6 @@ namespace System.Net.Sockets
 
             public readonly SocketAsyncContext AssociatedContext;
             public SocketError ErrorCode;
-            public CancellationTokenRegistration CancellationRegistration;
 
             public ManualResetEventSlim? Event { get; set; }
             public TaskCompletionSource<bool>? CompletionSource { get; set; }
@@ -100,16 +99,11 @@ namespace System.Net.Sockets
             }
 
             // This is called two places:
-            // One, when CancellationToken fires
+            // One, when CancellationToken fires. Though actually, I've disabled this.
             // Two, from StopAndAbort
             public bool TryCancel()
             {
                 Trace("Enter");
-
-                // We're already canceling, so we don't need to still be hooked up to listen to cancellation.
-                // The cancellation request could also be caused by something other than the token, so it's
-                // important we clean it up, regardless.
-                CancellationRegistration.Dispose();
 
                 // Try to transition from Waiting to Cancelled
                 SpinWait spinWait = default;
@@ -376,7 +370,7 @@ namespace System.Net.Sockets
             // Returns retry: false if we enqueued and will be signalled later.
             // NOTE: Using this for async ops now too....
             // NOTE: CancellationToken is never passed here anymore
-            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
+            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
             {
                 Trace(context, $"Enter");
 
@@ -411,14 +405,6 @@ namespace System.Net.Sockets
 
                             _tail = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                            // Now that the object is enqueued, hook up cancellation.
-                            // Note that it's possible the call to register itself could
-                            // call TryCancel, so we do this after the op is fully enqueued.
-                            if (cancellationToken.CanBeCanceled)
-                            {
-                                operation.CancellationRegistration = cancellationToken.UnsafeRegister(s => ((TOperation)s!).TryCancel(), operation);
-                            }
 
                             return (aborted: false, retry: false, observedSequenceNumber: 0);
 
@@ -1101,7 +1087,7 @@ namespace System.Net.Sockets
                         // Allocate the TCS we will wait on
                         state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber, CancellationToken.None);
+                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
@@ -1190,10 +1176,6 @@ namespace System.Net.Sockets
                 _operation.Event = null;
 
                 _operation.CompletionSource = null;
-
-                // Note: this used to happen in ProcessAsyncOperation, but this seems like the appropriate place to do it now.
-
-                _operation.CancellationRegistration.Dispose();
 
                 if (_isStarted)
                 {
