@@ -37,7 +37,7 @@ namespace System.Net.Sockets
     internal sealed class SocketAsyncContext
     {
         // TODO: The whole AsyncOperation infrastructure should die.
-        private abstract class AsyncOperation : IThreadPoolWorkItem
+        private abstract class AsyncOperation
         {
             private enum State
             {
@@ -197,37 +197,6 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Schedule()
-            {
-                Debug.Assert(Event == null);
-                Debug.Assert(CompletionSource is null);
-
-                Debug.Assert(false);
-
-                // Async operation.  Process the IO on the threadpool.
-                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
-            }
-
-            public void Process() => ((IThreadPoolWorkItem)this).Execute();
-
-            void IThreadPoolWorkItem.Execute()
-            {
-                // ReadOperation and WriteOperation, the only two types derived from
-                // AsyncOperation, implement IThreadPoolWorkItem.Execute to call
-                // ProcessAsyncOperation(this) on the appropriate receive or send queue.
-                // However, this base class needs to be able to queue them without
-                // additional allocation, so it also implements the interface in order
-                // to pass the compiler's static checking for the interface, but then
-                // when the runtime queries for the interface, it'll use the derived
-                // type's interface implementation.  We could instead just make this
-                // an abstract and have the derived types override it, but that adds
-                // "Execute" as a public method, which could easily be misunderstood.
-                // We could also add an abstract method that the base interface implementation
-                // invokes, but that adds an extra virtual dispatch.
-                Debug.Fail("Expected derived type to implement IThreadPoolWorkItem");
-                throw new InvalidOperationException();
-            }
-
             // Called when op is not in the queue yet, so can't be otherwise executing
             public void DoAbort()
             {
@@ -261,20 +230,16 @@ namespace System.Net.Sockets
 
         // These two abstract classes differentiate the operations that go in the
         // read queue vs the ones that go in the write queue.
-        private abstract class ReadOperation : AsyncOperation2<ReadOperation>, IThreadPoolWorkItem
+        private abstract class ReadOperation : AsyncOperation2<ReadOperation>
         {
             public ReadOperation(SocketAsyncContext context) : base(context) { }
-
-            void IThreadPoolWorkItem.Execute() => AssociatedContext.ProcessAsyncReadOperation(this);
 
             public sealed override ref OperationQueue<ReadOperation> OperationQueue => ref AssociatedContext._receiveQueue;
         }
 
-        private abstract class WriteOperation : AsyncOperation2<WriteOperation>, IThreadPoolWorkItem
+        private abstract class WriteOperation : AsyncOperation2<WriteOperation>
         {
             public WriteOperation(SocketAsyncContext context) : base(context) { }
-
-            void IThreadPoolWorkItem.Execute() => AssociatedContext.ProcessAsyncWriteOperation(this);
 
             public sealed override ref OperationQueue<WriteOperation> OperationQueue => ref AssociatedContext._sendQueue;
         }
@@ -574,89 +539,6 @@ namespace System.Net.Sockets
                 else
                 {
                     Debug.Assert(false);
-                }
-            }
-
-            // Here's what I basically want to do.
-            // I want to do something similar to the sync logic I have now.
-            // Except, I want to make the wait asynchronous, via a TaskCompletionSource type of thing
-            // Don't worry about the expense for now...
-
-            // My plan is to invoke ops similarly to the sync path, but using a TCS
-            // and singalling that TCS in all the places where we signal the Event today
-            // So, if that works, this code path ends up unused
-            // But, it's doing cancellation registration dispose, so that's probably worth understanding more....
-
-            // Re cancellation registration, we really should see how the cancellation token is used in the caller... may be unnecessary at this point...
-
-            // This is called on a thread pool thread when we think we are ready to process an operation.
-            // It's invoked from the epoll thread queuing work to the thread pool.
-
-            /// NOTE:
-            // Eventually this code shouldn't be invoked anymore, because the TCS logic will supersede it.
-            // However, let's at least keep it around for now as it's instructive, if nothing else.
-
-            internal void ProcessAsyncOperation(TOperation op)
-            {
-                OperationResult result = ProcessQueuedOperation(op);
-
-                Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
-                Debug.Assert(op.CompletionSource == null, "CompletionSource not null in ProcessAsyncOperation");
-
-                Debug.Assert(false);
-
-                if (result == OperationResult.Completed)
-                {
-                    // At this point, the operation has completed and it's no longer
-                    // in the queue / no one else has a reference to it.  We can invoke
-                    // the callback and let it pool the object if appropriate. This is
-                    // also a good time to unregister from cancellation; we must do
-                    // so before the object is returned to the pool (or else a cancellation
-                    // request for a previous operation could affect a subsequent one)
-                    // and here we know the operation has completed.
-                    op.CancellationRegistration.Dispose();
-                    op.InvokeCallback(allowPooling: true);
-                }
-            }
-
-            public enum OperationResult
-            {
-                Pending = 0,
-                Completed = 1,
-                Cancelled = 2
-            }
-
-            public OperationResult ProcessQueuedOperation(TOperation op)
-            {
-                bool cancelled;
-                int observedSequenceNumber;
-                (cancelled, observedSequenceNumber) = GetQueuedOperationStatus(op);
-                if (cancelled)
-                {
-                    return OperationResult.Cancelled;
-                }
-
-                while (true)
-                {
-                    // Try to perform the IO
-                    // TODO: Why does TryComplete take a context if the op already has it?
-                    if (op.TryComplete(op.AssociatedContext))
-                    {
-                        CompleteQueuedOperation(op);
-                        return OperationResult.Completed;
-                    }
-
-                    bool retry;
-                    (cancelled, retry, observedSequenceNumber) = PendQueuedOperation(op, observedSequenceNumber);
-                    if (cancelled)
-                    {
-                        return OperationResult.Cancelled;
-                    }
-
-                    if (!retry)
-                    {
-                        return OperationResult.Pending;
-                    }
                 }
             }
 
@@ -1365,10 +1247,6 @@ namespace System.Net.Sockets
             errorCode = SocketError.TimedOut;
             return false;
         }
-
-        private void ProcessAsyncReadOperation(ReadOperation op) => _receiveQueue.ProcessAsyncOperation(op);
-
-        private void ProcessAsyncWriteOperation(WriteOperation op) => _sendQueue.ProcessAsyncOperation(op);
 
         public SocketError Accept(byte[] socketAddress, ref int socketAddressLen, out IntPtr acceptedFd)
         {
@@ -2190,7 +2068,7 @@ namespace System.Net.Sockets
         // advised) and more threads are not immediately available to run work items that would release those operations.
 
         // Ignore above comment.
-
+        // We are now handling all events on the epoll thread.
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void HandleEventsOnEpollThread(Interop.Sys.SocketEvents events)
@@ -2211,7 +2089,6 @@ namespace System.Net.Sockets
             if ((events & Interop.Sys.SocketEvents.Write) != 0)
             {
                 _sendQueue.ProcessSyncEventOrGetAsyncEvent(this);
-
             }
         }
 
