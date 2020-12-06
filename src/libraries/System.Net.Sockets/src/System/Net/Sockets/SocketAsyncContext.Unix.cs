@@ -215,8 +215,11 @@ namespace System.Net.Sockets
 
                     if (_state == QueueState.Ready)
                     {
-                        _dataAvailable = false;
-                        return true;
+                        if (_dataAvailable)
+                        {
+                            _dataAvailable = false;
+                            return true;
+                        }
                     }
 
                     return false;
