@@ -209,41 +209,13 @@ namespace System.Net.Sockets
             // NOTE: Using this for async ops now too....
             public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation)
             {
-                Trace(context, $"Enter");
-
                 // TODO: This could probably be popped up a level, or handled differently...
                 if (!context.IsRegistered)
                 {
                     context.Register();
                 }
 
-                using (Lock())
-                {
-                    if (_stopped)
-                    {
-                        Debug.Assert(_currentOperation == null);
-                        Trace(context, $"Leave, queue stopped");
-                        return (aborted: true, retry: false);
-                    }
-
-                    Debug.Assert(_currentOperation == null);
-
-                    if (_dataAvailable)
-                    {
-                        // The queue has become ready again since we previously checked it.
-                        // So, we need to retry the operation before we enqueue it.
-                        _dataAvailable = false;
-                        Trace(context, $"Leave, signal retry");
-                        return (aborted: false, retry: true);
-                    }
-
-                    // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                    _currentOperation = operation;
-
-                    Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                    return (aborted: false, retry: false);
-                }
+                return PendQueuedOperation(operation);
             }
 
             // Note, I changed the default of processAsyncEvents to false.
@@ -301,7 +273,6 @@ namespace System.Net.Sockets
                     if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
-                        Trace(op.AssociatedContext, $"Exit (stopped)");
                         return (true, false);
                     }
 
@@ -315,7 +286,6 @@ namespace System.Net.Sockets
                     else
                     {
                         _currentOperation = op;
-                        Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
                         return (false, false);
                     }
                 }
