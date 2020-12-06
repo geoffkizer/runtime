@@ -200,7 +200,8 @@ namespace System.Net.Sockets
                                             // since the last time we checked the state of the queue.
                                             // If this happens, we MUST retry the operation, otherwise we risk
                                             // "losing" the notification and causing the operation to pend indefinitely.
-            private AsyncOperation? _tail;   // Queue of pending IO operations to process when data becomes available.
+
+            private AsyncOperation? _currentOperation;
 
             // The _queueLock is used to ensure atomic access to the queue state above.
             // The lock is only ever held briefly, to read and/or update queue state, and
@@ -224,6 +225,24 @@ namespace System.Net.Sockets
             // observedSequenceNumber must be passed to StartAsyncOperation.
             public bool IsReady(SocketAsyncContext context, out int observedSequenceNumber)
             {
+                Debug.Assert(sizeof(QueueState) == sizeof(int));
+
+                using (Lock())
+                {
+                    QueueState state = _state;
+                    observedSequenceNumber = _sequenceNumber;
+
+                    bool isReady = state == QueueState.Ready || state == QueueState.Stopped;
+                    if (!isReady)
+                    {
+                        observedSequenceNumber--;
+                    }
+
+                    Trace(context, $"{isReady}");
+
+                    return isReady;
+                }
+#if false
                 // It is safe to read _state and _sequence without using Lock.
                 // - The return value is soley based on Volatile.Read of _state.
                 // - The Volatile.Read of _sequenceNumber ensures we read a value before executing the operation.
@@ -245,6 +264,7 @@ namespace System.Net.Sockets
                 Trace(context, $"{isReady}");
 
                 return isReady;
+#endif
             }
 
             // TODO: This is a modified version of above for sync operations.
@@ -285,9 +305,9 @@ namespace System.Net.Sockets
 
                         case QueueState.Waiting:
                             // Enqueue the operation.
-                            Debug.Assert(_tail == null);
+                            Debug.Assert(_currentOperation == null);
 
-                            _tail = operation;
+                            _currentOperation = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
 
                             return (aborted: false, retry: false, observedSequenceNumber: 0);
@@ -299,7 +319,7 @@ namespace System.Net.Sockets
                             break;
 
                         case QueueState.Stopped:
-                            Debug.Assert(_tail == null);
+                            Debug.Assert(_currentOperation == null);
                             doAbort = true;
                             break;
 
@@ -336,14 +356,14 @@ namespace System.Net.Sockets
                     switch (_state)
                     {
                         case QueueState.Ready:
-                            Debug.Assert(_tail == null, "State == Ready but queue is not empty!");
+                            Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
                             _sequenceNumber++;
                             Trace(context, $"Exit (previously ready)");
                             return;
 
                         case QueueState.Waiting:
-                            Debug.Assert(_tail != null, "State == Waiting but queue is empty!");
-                            op = _tail;
+                            Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
+                            op = _currentOperation;
 
                             // NOTE: We are always processing the op right now. See below.
 
@@ -352,13 +372,13 @@ namespace System.Net.Sockets
                             break;
 
                         case QueueState.Processing:
-                            Debug.Assert(_tail != null, "State == Processing but queue is empty!");
+                            Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
                             _sequenceNumber++;
                             Trace(context, $"Exit (currently processing)");
                             return;
 
                         case QueueState.Stopped:
-                            Debug.Assert(_tail == null);
+                            Debug.Assert(_currentOperation == null);
                             Trace(context, $"Exit (stopped)");
                             return;
 
@@ -381,14 +401,14 @@ namespace System.Net.Sockets
 
                     if (_state == QueueState.Stopped)
                     {
-                        Debug.Assert(_tail == null);
+                        Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
                         return (true, 0);
                     }
                     else
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                        Debug.Assert(_tail != null, "Unexpected empty queue while processing I/O");
+                        Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
                         observedSequenceNumber = _sequenceNumber;
                     }
                 }
@@ -411,7 +431,7 @@ namespace System.Net.Sockets
                 {
                     if (_state == QueueState.Stopped)
                     {
-                        Debug.Assert(_tail == null);
+                        Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
                         return (true, false, 0);
                     }
@@ -444,17 +464,17 @@ namespace System.Net.Sockets
                 {
                     if (_state == QueueState.Stopped)
                     {
-                        Debug.Assert(_tail == null);
+                        Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
                     }
                     else
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
 
-                        Debug.Assert(op == _tail);
+                        Debug.Assert(op == _currentOperation);
 
                         // No more operations to process
-                        _tail = null;
+                        _currentOperation = null;
                         _state = QueueState.Ready;
                         _sequenceNumber++;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
@@ -464,25 +484,22 @@ namespace System.Net.Sockets
 
             public void CancelAndContinueProcessing(TOperation op)
             {
-                // Note, only sync operations use this method.
-                Debug.Assert(op.Event != null || op.CompletionSource is not null);
-
                 // Remove operation from queue.
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
                     if (_state == QueueState.Stopped)
                     {
-                        Debug.Assert(_tail == null);
+                        Debug.Assert(_currentOperation == null);
                     }
                     else
                     {
-                        Debug.Assert(_tail != null, "Unexpected empty queue in CancelAndContinueProcessing");
+                        Debug.Assert(_currentOperation != null, "Unexpected empty queue in CancelAndContinueProcessing");
 
-                        Debug.Assert(op == _tail);
+                        Debug.Assert(op == _currentOperation);
 
                         // No more operations
-                        _tail = null;
+                        _currentOperation = null;
 
                         // We're the first op in the queue.
                         if (_state == QueueState.Processing)
@@ -515,16 +532,16 @@ namespace System.Net.Sockets
 
                     _state = QueueState.Stopped;
 
-                    if (_tail != null)
+                    if (_currentOperation != null)
                     {
-                        AsyncOperation op = _tail;
+                        AsyncOperation op = _currentOperation;
 
                         op.TryCancel();
 
                         aborted = true;
                     }
 
-                    _tail = null;
+                    _currentOperation = null;
 
                     Trace(context, $"Exit");
                 }
@@ -540,7 +557,7 @@ namespace System.Net.Sockets
                     typeof(TOperation) == typeof(WriteOperation) ? "send" :
                     "???";
 
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_sequenceNumber}, {((_tail == null) ? "empty" : "not empty")}");
+                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_sequenceNumber}, {((_currentOperation == null) ? "empty" : "not empty")}");
             }
         }
 
