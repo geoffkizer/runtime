@@ -195,11 +195,9 @@ namespace System.Net.Sockets
             // These fields define the queue state.
 
             private QueueState _state;      // See above
-            private int _sequenceNumber;    // This sequence number is updated when we receive an epoll notification.
-                                            // It allows us to detect when a new epoll notification has arrived
-                                            // since the last time we checked the state of the queue.
-                                            // If this happens, we MUST retry the operation, otherwise we risk
-                                            // "losing" the notification and causing the operation to pend indefinitely.
+
+            // This replaces the old sequence number.
+            private bool _newDataAvailable;
 
             private AsyncOperation? _currentOperation;
 
@@ -216,7 +214,7 @@ namespace System.Net.Sockets
                 _queueLock = new object();
 
                 _state = QueueState.Ready;
-                _sequenceNumber = 0;
+                _newDataAvailable = false;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
@@ -230,16 +228,13 @@ namespace System.Net.Sockets
                 using (Lock())
                 {
                     QueueState state = _state;
-                    observedSequenceNumber = _sequenceNumber;
+                    _newDataAvailable = false;
 
                     bool isReady = state == QueueState.Ready || state == QueueState.Stopped;
-                    if (!isReady)
-                    {
-                        observedSequenceNumber--;
-                    }
 
                     Trace(context, $"{isReady}");
 
+                    observedSequenceNumber = 0;
                     return isReady;
                 }
 #if false
@@ -290,12 +285,11 @@ namespace System.Net.Sockets
                     switch (_state)
                     {
                         case QueueState.Ready:
-                            if (observedSequenceNumber != _sequenceNumber)
+                            if (_newDataAvailable)
                             {
                                 // The queue has become ready again since we previously checked it.
                                 // So, we need to retry the operation before we enqueue it.
-                                Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
-                                observedSequenceNumber = _sequenceNumber;
+                                _newDataAvailable = false;
                                 break;
                             }
 
@@ -357,7 +351,7 @@ namespace System.Net.Sockets
                     {
                         case QueueState.Ready:
                             Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
-                            _sequenceNumber++;
+                            _newDataAvailable = true;
                             Trace(context, $"Exit (previously ready)");
                             return;
 
@@ -373,7 +367,7 @@ namespace System.Net.Sockets
 
                         case QueueState.Processing:
                             Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
-                            _sequenceNumber++;
+                            _newDataAvailable = true;
                             Trace(context, $"Exit (currently processing)");
                             return;
 
@@ -409,7 +403,8 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
                         Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
-                        observedSequenceNumber = _sequenceNumber;
+                        _newDataAvailable = false;
+                        observedSequenceNumber = 0;
                     }
                 }
 
@@ -439,12 +434,10 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
 
-                        if (observedSequenceNumber != _sequenceNumber)
+                        if (_newDataAvailable)
                         {
-                            // We received another epoll notification since we previously checked it.
-                            // So, we need to retry the operation.
-                            Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
-                            observedSequenceNumber = _sequenceNumber;
+                            _newDataAvailable = false;
+                            observedSequenceNumber = 0;
                         }
                         else
                         {
@@ -476,7 +469,7 @@ namespace System.Net.Sockets
                         // No more operations to process
                         _currentOperation = null;
                         _state = QueueState.Ready;
-                        _sequenceNumber++;
+                        _newDataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
                 }
@@ -505,12 +498,12 @@ namespace System.Net.Sockets
                         if (_state == QueueState.Processing)
                         {
                             _state = QueueState.Ready;
-                            _sequenceNumber++;
+                            _newDataAvailable = true;
                         }
                         else if (_state == QueueState.Waiting)
                         {
                             _state = QueueState.Ready;
-                            _sequenceNumber++;
+                            _newDataAvailable = true;
                         }
                     }
                 }
@@ -557,7 +550,7 @@ namespace System.Net.Sockets
                     typeof(TOperation) == typeof(WriteOperation) ? "send" :
                     "???";
 
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_sequenceNumber}, {((_currentOperation == null) ? "empty" : "not empty")}");
+                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_newDataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
             }
         }
 
