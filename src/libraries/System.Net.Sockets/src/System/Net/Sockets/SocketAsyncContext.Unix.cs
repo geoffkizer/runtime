@@ -818,7 +818,7 @@ namespace System.Net.Sockets
                     if (cancelled)
                     {
                         Cleanup();
-                        return (false, _operation.ErrorCode);
+                        return (false, SocketError.OperationAborted);
                     }
 
                     if (retry)
@@ -835,7 +835,7 @@ namespace System.Net.Sockets
                     if (cancelled)
                     {
                         Cleanup();
-                        return (false, _operation.ErrorCode);
+                        return (false, SocketError.OperationAborted);
                     }
 
                     if (retry)
@@ -858,7 +858,7 @@ namespace System.Net.Sockets
                 if (cancelled)
                 {
                     Cleanup();
-                    return (false, _operation.ErrorCode);
+                    return (false, SocketError.OperationAborted);
                 }
 
                 return (true, default);
