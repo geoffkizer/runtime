@@ -85,18 +85,6 @@ namespace System.Net.Sockets
             {
                 ErrorCode = SocketError.OperationAborted;
             }
-
-            [Conditional("SOCKETASYNCCONTEXT_TRACE")]
-            public void Trace(string message, [CallerMemberName] string? memberName = null)
-            {
-                OutputTrace($"{IdOf(this)}.{memberName}: {message}");
-            }
-
-            [Conditional("SOCKETASYNCCONTEXT_TRACE")]
-            public void TraceWithContext(SocketAsyncContext context, string message, [CallerMemberName] string? memberName = null)
-            {
-                OutputTrace($"{IdOf(context)}, {IdOf(this)}.{memberName}: {message}");
-            }
         }
 
         private abstract class AsyncOperation2<T> : AsyncOperation
