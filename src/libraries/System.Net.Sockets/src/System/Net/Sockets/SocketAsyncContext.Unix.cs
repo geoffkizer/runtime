@@ -57,21 +57,7 @@ namespace System.Net.Sockets
             public void TryCancel()
             {
                 DoAbort();
-
-                ManualResetEventSlim? e = Event;
-                TaskCompletionSource<bool>? tcs = CompletionSource;
-                if (e != null)
-                {
-                    e.Set();
-                }
-                else if (tcs is not null)
-                {
-                    tcs.TrySetResult(true);         // True indicates cancellation
-                }
-                else
-                {
-                    Debug.Assert(false);
-                }
+                Signal(true);
             }
 
             // TODO: I don't think I should need to explicitly pass [cancel] here.
