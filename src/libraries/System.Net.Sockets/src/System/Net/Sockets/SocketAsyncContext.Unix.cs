@@ -216,10 +216,17 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(_dataAvailable);
-
-                    _dataAvailable = false;
-                    return (_state == QueueState.Ready);
+                    if (_state == QueueState.Ready)
+                    {
+                        Debug.Assert(_dataAvailable);
+                        _dataAvailable = false;
+                        return true;
+                    }
+                    else
+                    {
+                        Debug.Assert(!_dataAvailable);
+                        return false;
+                    }
                 }
             }
 
