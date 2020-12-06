@@ -178,6 +178,8 @@ namespace System.Net.Sockets
                 }
                 else
                 {
+                    Debug.Assert(false);
+
 #if DEBUG
                     Debug.Assert(Interlocked.CompareExchange(ref _callbackQueued, 1, 0) == 0, $"Unexpected _callbackQueued: {_callbackQueued}");
 #endif
@@ -210,6 +212,8 @@ namespace System.Net.Sockets
                 }
                 else
                 {
+                    Debug.Assert(false);
+
                     // Async operation.
                     Schedule();
                 }
@@ -219,6 +223,8 @@ namespace System.Net.Sockets
             {
                 Debug.Assert(Event == null);
                 Debug.Assert(CompletionSource is null);
+
+                Debug.Assert(false);
 
                 // Async operation.  Process the IO on the threadpool.
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
@@ -691,6 +697,8 @@ namespace System.Net.Sockets
                 }
                 else
                 {
+                    Debug.Assert(false);
+
                     // Async operation.  The caller will figure out how to process the IO.
                     Debug.Assert(!skipAsyncEvents);
                     if (processAsyncEvents)
@@ -727,6 +735,8 @@ namespace System.Net.Sockets
 
                 Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
                 Debug.Assert(op.CompletionSource == null, "CompletionSource not null in ProcessAsyncOperation");
+
+                Debug.Assert(false);
 
                 if (result == OperationResult.Completed)
                 {
