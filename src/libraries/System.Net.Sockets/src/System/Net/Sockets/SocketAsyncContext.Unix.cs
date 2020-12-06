@@ -221,7 +221,7 @@ namespace System.Net.Sockets
 
             // IsReady returns whether an operation can be executed immediately.
             // observedSequenceNumber must be passed to StartAsyncOperation.
-            public bool IsReady(SocketAsyncContext context, out int observedSequenceNumber)
+            public bool IsReady(SocketAsyncContext context)
             {
                 Debug.Assert(sizeof(QueueState) == sizeof(int));
 
@@ -234,7 +234,6 @@ namespace System.Net.Sockets
 
                     Trace(context, $"{isReady}");
 
-                    observedSequenceNumber = 0;
                     return isReady;
                 }
 #if false
@@ -269,7 +268,7 @@ namespace System.Net.Sockets
             // Returns retry: false if we enqueued and will be signalled later.
             // NOTE: Using this for async ops now too....
             // NOTE: CancellationToken is never passed here anymore
-            public (bool aborted, bool retry, int observedSequenceNumber) StartSyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber)
+            public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation)
             {
                 Trace(context, $"Enter");
 
@@ -304,7 +303,7 @@ namespace System.Net.Sockets
                             _currentOperation = operation;
                             Trace(context, $"Leave, enqueued {IdOf(operation)}");
 
-                            return (aborted: false, retry: false, observedSequenceNumber: 0);
+                            return (aborted: false, retry: false);
 
                         case QueueState.Processing:
                             // We should never be processing when a new operation arrives.
@@ -327,12 +326,12 @@ namespace System.Net.Sockets
                 {
                     operation.DoAbort();
                     Trace(context, $"Leave, queue stopped");
-                    return (aborted: true, retry: false, observedSequenceNumber: 0);
+                    return (aborted: true, retry: false);
                 }
 
                 // Tell the caller to retry the operation.
                 Trace(context, $"Leave, signal retry");
-                return (aborted: false, retry: true, observedSequenceNumber: observedSequenceNumber);
+                return (aborted: false, retry: true);
             }
 
             // Note, I changed the default of processAsyncEvents to false.
@@ -386,9 +385,8 @@ namespace System.Net.Sockets
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
-            public (bool cancelled, int observedSequenceNumber) GetQueuedOperationStatus(TOperation op)
+            public bool GetQueuedOperationStatus(TOperation op)
             {
-                int observedSequenceNumber;
                 using (Lock())
                 {
                     Trace(op.AssociatedContext, $"Enter");
@@ -397,18 +395,17 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
-                        return (true, 0);
+                        return true;
                     }
                     else
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
                         Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
                         _newDataAvailable = false;
-                        observedSequenceNumber = 0;
                     }
                 }
 
-                return (false, observedSequenceNumber);
+                return false;
             }
 
             public void CompleteQueuedOperation(TOperation op)
@@ -418,7 +415,7 @@ namespace System.Net.Sockets
 
             // We tried the op and it didn't complete.
             // Set it to pend again, unless we need to retry again
-            public (bool cancelled, bool retry, int observedSequenceNumber) PendQueuedOperation(TOperation op, int observedSequenceNumber)
+            public (bool cancelled, bool retry) PendQueuedOperation(TOperation op)
             {
                 // Check for retry and reset queue state.
 
@@ -428,7 +425,7 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
-                        return (true, false, 0);
+                        return (true, false);
                     }
                     else
                     {
@@ -437,18 +434,17 @@ namespace System.Net.Sockets
                         if (_newDataAvailable)
                         {
                             _newDataAvailable = false;
-                            observedSequenceNumber = 0;
                         }
                         else
                         {
                             _state = QueueState.Waiting;
                             Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
-                            return (false, false, 0);
+                            return (false, false);
                         }
                     }
                 }
 
-                return (false, true, observedSequenceNumber);
+                return (false, true);
             }
 
             public void RemoveQueuedOperation(TOperation op)
@@ -701,7 +697,6 @@ namespace System.Net.Sockets
             private bool _isInQueue;
             private int _timeout;
             private CancellationToken _cancellationToken;
-            private int _observedSequenceNumber;
             private T _operation;
 
             public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
@@ -713,7 +708,6 @@ namespace System.Net.Sockets
 
                 _isStarted = false;
                 _isInQueue = false;
-                _observedSequenceNumber = 0;
 
                 _operation = operation;
             }
@@ -838,7 +832,7 @@ namespace System.Net.Sockets
                     }
 
                     _isStarted = true;
-                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext, out _observedSequenceNumber))
+                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext))
                     {
                         return (true, default);
                     }
@@ -857,7 +851,7 @@ namespace System.Net.Sockets
                     // Allocate the event we will wait on
                     _operation.Event = new ManualResetEventSlim(false, 0);
 
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation, _observedSequenceNumber);
+                    (cancelled, retry) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation);
                     if (cancelled)
                     {
                         Cleanup();
@@ -874,7 +868,7 @@ namespace System.Net.Sockets
                 else
                 {
                     // We just tried to execute the queued operation, but it failed.
-                    (cancelled, retry, _observedSequenceNumber) = _operation.OperationQueue.PendQueuedOperation(_operation, _observedSequenceNumber);
+                    (cancelled, retry) = _operation.OperationQueue.PendQueuedOperation(_operation);
                     if (cancelled)
                     {
                         Cleanup();
@@ -897,7 +891,7 @@ namespace System.Net.Sockets
                 }
 
                 // We've been signalled to try to process the operation.
-                (cancelled, _observedSequenceNumber) = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
+                cancelled = _operation.OperationQueue.GetQueuedOperationStatus(_operation);
                 if (cancelled)
                 {
                     Cleanup();
@@ -941,7 +935,7 @@ namespace System.Net.Sockets
                         }
 
                         state._isStarted = true;
-                        if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext, out state._observedSequenceNumber))
+                        if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext))
                         {
                             Print($"--- WaitForAsyncRetry: IsReady == true, return true");
                             return (true, default, state);
@@ -962,7 +956,7 @@ namespace System.Net.Sockets
                         // Allocate the TCS we will wait on
                         state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation, state._observedSequenceNumber);
+                        (cancelled, retry) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
@@ -983,7 +977,7 @@ namespace System.Net.Sockets
                     else
                     {
                         // We just tried to execute the queued operation, but it failed.
-                        (cancelled, retry, state._observedSequenceNumber) = state._operation.OperationQueue.PendQueuedOperation(state._operation, state._observedSequenceNumber);
+                        (cancelled, retry) = state._operation.OperationQueue.PendQueuedOperation(state._operation);
                         if (cancelled)
                         {
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned cancelled, return false");
@@ -1015,7 +1009,7 @@ namespace System.Net.Sockets
                     }
 
                     // We've been signalled to try to process the operation.
-                    (cancelled, state._observedSequenceNumber) = state._operation.OperationQueue.GetQueuedOperationStatus(state._operation);
+                    cancelled = state._operation.OperationQueue.GetQueuedOperationStatus(state._operation);
                     if (cancelled)
                     {
                         Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
