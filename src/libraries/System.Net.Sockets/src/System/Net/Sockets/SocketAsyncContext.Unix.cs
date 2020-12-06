@@ -197,28 +197,6 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            public void Dispatch()
-            {
-                ManualResetEventSlim? e = Event;
-                TaskCompletionSource<bool>? tcs = CompletionSource;
-                if (e != null)
-                {
-                    // Sync operation.  Signal waiting thread to continue processing.
-                    e.Set();
-                }
-                else if (tcs is not null)
-                {
-                    tcs.TrySetResult(false);
-                }
-                else
-                {
-                    Debug.Assert(false);
-
-                    // Async operation.
-                    Schedule();
-                }
-            }
-
             public void Schedule()
             {
                 Debug.Assert(Event == null);
@@ -2286,6 +2264,9 @@ namespace System.Net.Sockets
         // Called on ThreadPool thread.
         public unsafe void HandleEvents(Interop.Sys.SocketEvents events)
         {
+            // This should not be called anymore. All events are handled on the epoll thread now.
+            Debug.Assert(false);
+
             Debug.Assert((events & Interop.Sys.SocketEvents.Error) == 0);
 
             AsyncOperation? receiveOperation =
