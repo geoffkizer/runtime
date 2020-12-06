@@ -236,12 +236,6 @@ namespace System.Net.Sockets
                 {
                     Trace(context, $"Enter");
 
-                    if (_stopped)
-                    {
-                        Debug.Assert(_currentOperation == null);
-                        return;
-                    }
-
                     _dataAvailable = true;
                     if (_currentOperation is not null)
                     {
