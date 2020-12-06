@@ -162,9 +162,6 @@ namespace System.Net.Sockets
             // If we successfully process all enqueued operations, then the state becomes Ready;
             // otherwise, the state becomes Waiting and we wait for another epoll notification.
 
-            // This is probably kinda stupid, but maybe it's useful.
-            private bool _isReady;
-
             private bool _stopped;          // Replaces QueueState.Stopped
 
             // This replaces the old sequence number.
@@ -184,7 +181,6 @@ namespace System.Net.Sockets
                 Debug.Assert(_queueLock == null);
                 _queueLock = new object();
 
-                _isReady = true;
                 _stopped = false;
                 _dataAvailable = true;
 
@@ -202,12 +198,8 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(_isReady == (_currentOperation == null));
-
-                    if (_isReady)
+                    if (_currentOperation == null)
                     {
-                        Debug.Assert(_currentOperation == null);
-
                         _dataAvailable = false;
                         return true;
                     }
@@ -241,7 +233,6 @@ namespace System.Net.Sockets
                         return (aborted: true, retry: false);
                     }
 
-                    Debug.Assert(_isReady);
                     Debug.Assert(_currentOperation == null);
 
                     if (_dataAvailable)
@@ -254,7 +245,6 @@ namespace System.Net.Sockets
                     }
 
                     // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                    _isReady = false;
                     _currentOperation = operation;
 
                     Trace(context, $"Leave, enqueued {IdOf(operation)}");
@@ -302,7 +292,6 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(!_isReady);
                     Debug.Assert(_currentOperation == op);
                     _dataAvailable = false;
                     return false;
@@ -329,7 +318,6 @@ namespace System.Net.Sockets
                         return (true, false);
                     }
 
-                    Debug.Assert(!_isReady);
                     Debug.Assert(op == _currentOperation);
 
                     if (_dataAvailable)
@@ -356,12 +344,10 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(!_isReady);
                         Debug.Assert(_currentOperation == op);
 
                         // No more operations to process
                         _currentOperation = null;
-                        _isReady = true;
                         _dataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
@@ -389,7 +375,6 @@ namespace System.Net.Sockets
                         _currentOperation = null;
 
                         // Just assume there is data available.
-                        _isReady = true;
                         _dataAvailable = true;
                     }
                 }
