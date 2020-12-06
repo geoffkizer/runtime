@@ -204,6 +204,8 @@ namespace System.Net.Sockets
 
                     if (_isReady)
                     {
+                        Debug.Assert(_currentOperation == null);
+
                         _dataAvailable = false;
                         return true;
                     }
