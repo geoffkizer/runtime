@@ -104,6 +104,9 @@ namespace System.Net.Sockets
                 Volatile.Write(ref _state, (int)State.Waiting);
             }
 
+            // This is called two places:
+            // One, when CancellationToken fires
+            // Two, from StopAndAbort
             public bool TryCancel()
             {
                 Trace("Enter");
@@ -389,7 +392,6 @@ namespace System.Net.Sockets
                             goto case QueueState.Waiting;
 
                         case QueueState.Waiting:
-                        case QueueState.Processing:
                             // Enqueue the operation.
                             Debug.Assert(_tail == null);
 
@@ -405,6 +407,10 @@ namespace System.Net.Sockets
                             }
 
                             return (aborted: false, retry: false, observedSequenceNumber: 0);
+
+                        case QueueState.Processing:
+                            Debug.Assert(false);
+                            break;
 
                         case QueueState.Stopped:
                             Debug.Assert(_tail == null);
@@ -803,7 +809,6 @@ namespace System.Net.Sockets
             return new SyncOperationState2<WriteOperation>(new DumbSyncSendOperation(this), cancellationToken: cancellationToken);
         }
 
-        // TODO: SImilar for write
         private static ValueTask<(bool, SocketError, SyncOperationState2<ReadOperation>)> WaitForReadAsyncRetry(SyncOperationState2<ReadOperation> state) =>
             SyncOperationState2<ReadOperation>.WaitForAsyncRetry(state);
 
