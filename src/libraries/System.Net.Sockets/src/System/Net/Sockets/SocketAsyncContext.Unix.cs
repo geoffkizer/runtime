@@ -250,7 +250,6 @@ namespace System.Net.Sockets
                     if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
-                        operation.DoAbort();
                         Trace(context, $"Leave, queue stopped");
                         return (aborted: true, retry: false);
                     }
