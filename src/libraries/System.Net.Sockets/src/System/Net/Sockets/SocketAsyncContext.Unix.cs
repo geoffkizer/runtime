@@ -339,6 +339,7 @@ namespace System.Net.Sockets
                         case QueueState.Waiting:
                             Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
                             op = _currentOperation;
+                            _currentOperation = null;
 
                             // NOTE: We are always processing the op right now. See below.
 
@@ -347,7 +348,7 @@ namespace System.Net.Sockets
                             break;
 
                         case QueueState.Processing:
-                            Debug.Assert(_currentOperation != null, "State == Processing but queue is empty!");
+                            Debug.Assert(_currentOperation == null, "State == Processing but queue is empty!");
                             _dataAvailable = true;
                             Trace(context, $"Exit (currently processing)");
                             return;
@@ -362,6 +363,7 @@ namespace System.Net.Sockets
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
+            // Basically, this just checks for whether the queue is stopped, and resets _dataAvailable
             public bool GetQueuedOperationStatus(TOperation op)
             {
                 using (Lock())
@@ -376,7 +378,7 @@ namespace System.Net.Sockets
                     }
 
                     Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                    Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
+                    Debug.Assert(_currentOperation == null, "Unexpected empty queue while processing I/O");
                     _dataAvailable = false;
                 }
 
@@ -404,6 +406,7 @@ namespace System.Net.Sockets
                     }
 
                     Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                    Debug.Assert(_currentOperation == null);
 
                     if (_dataAvailable)
                     {
@@ -412,6 +415,7 @@ namespace System.Net.Sockets
                     else
                     {
                         _state = QueueState.Waiting;
+                        _currentOperation = op;
                         Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
                         return (false, false);
                     }
@@ -432,11 +436,9 @@ namespace System.Net.Sockets
                     else
                     {
                         Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-
-                        Debug.Assert(op == _currentOperation);
+                        Debug.Assert(_currentOperation == null);
 
                         // No more operations to process
-                        _currentOperation = null;
                         _state = QueueState.Ready;
                         _dataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
@@ -456,12 +458,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation != null, "Unexpected empty queue in CancelAndContinueProcessing");
-
-                        Debug.Assert(op == _currentOperation);
-
-                        // No more operations
-                        _currentOperation = null;
+                        Debug.Assert(_currentOperation == null);
 
                         // We're the first op in the queue.
                         if (_state == QueueState.Processing)
@@ -473,6 +470,10 @@ namespace System.Net.Sockets
                         {
                             _state = QueueState.Ready;
                             _dataAvailable = true;
+                        }
+                        else
+                        {
+                            Debug.Assert(false);
                         }
                     }
                 }
