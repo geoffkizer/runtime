@@ -323,7 +323,9 @@ namespace System.Net.Sockets
 
                             _dataAvailable = true;
 
-                            _state = QueueState.Processing;
+                            // We used to transition to Processing here, but don't do that anymore.
+                            //_state = QueueState.Processing;
+
                             // Break out and release lock
                             break;
 
@@ -356,7 +358,7 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                    Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
                     Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
                     _dataAvailable = false;
                     return false;
@@ -383,7 +385,7 @@ namespace System.Net.Sockets
                         return (true, false);
                     }
 
-                    Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                    Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
 
                     if (_dataAvailable)
                     {
@@ -410,7 +412,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                        Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
 
                         Debug.Assert(op == _currentOperation);
 
