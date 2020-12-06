@@ -105,6 +105,7 @@ namespace System.Net.Sockets
             {
                 Trace("Enter");
 
+#if false
                 // Try to transition from Waiting to Cancelled
                 SpinWait spinWait = default;
                 bool keepWaiting = true;
@@ -137,6 +138,7 @@ namespace System.Net.Sockets
                             return false;
                     }
                 }
+#endif
 
                 Trace("Cancelled, processing completion");
 
