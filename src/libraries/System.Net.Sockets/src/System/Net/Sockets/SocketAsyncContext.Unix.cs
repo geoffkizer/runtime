@@ -950,6 +950,7 @@ namespace System.Net.Sockets
 
                 if (cancelled)
                 {
+                    state._operation.ErrorCode = SocketError.OperationAborted;
                     return (false, state);
                 }
 
