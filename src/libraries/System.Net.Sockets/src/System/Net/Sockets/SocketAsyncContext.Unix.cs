@@ -187,14 +187,13 @@ namespace System.Net.Sockets
                 Processing = 2,     // Indicates that a thread pool item has been scheduled (and may
                                     // be executing) to process the IO operations in the queue.
                                     // Queue must not be empty.
-                Stopped = 3,        // Indicates that the queue has been stopped because the
-                                    // socket has been closed.
-                                    // Queue must be empty.
             }
 
             // These fields define the queue state.
 
             private QueueState _state;      // See above
+
+            private bool _stopped;          // Replaces QueueState.Stopped
 
             // This replaces the old sequence number.
             private bool _dataAvailable;
@@ -214,6 +213,7 @@ namespace System.Net.Sockets
                 _queueLock = new object();
 
                 _state = QueueState.Ready;
+                _stopped = false;
                 _dataAvailable = false;
 
                 _semaphore = new SemaphoreSlim(1, 1);
@@ -227,14 +227,13 @@ namespace System.Net.Sockets
 
                 using (Lock())
                 {
-                    QueueState state = _state;
+                    if (_stopped)
+                    {
+                        return true;
+                    }
+
                     _dataAvailable = false;
-
-                    bool isReady = state == QueueState.Ready || state == QueueState.Stopped;
-
-                    Trace(context, $"{isReady}");
-
-                    return isReady;
+                    return (_state == QueueState.Ready);
                 }
             }
 
@@ -257,6 +256,12 @@ namespace System.Net.Sockets
                 bool doAbort = false;
                 using (Lock())
                 {
+                    if (_stopped)
+                    {
+                        Debug.Assert(_currentOperation == null);
+                        doAbort = true;
+                    }
+
                     switch (_state)
                     {
                         case QueueState.Ready:
@@ -285,11 +290,6 @@ namespace System.Net.Sockets
                             // We should never be processing when a new operation arrives.
                             // The semaphore should guarantee mutual exclusion in that regard.
                             Debug.Assert(false);
-                            break;
-
-                        case QueueState.Stopped:
-                            Debug.Assert(_currentOperation == null);
-                            doAbort = true;
                             break;
 
                         default:
@@ -322,6 +322,12 @@ namespace System.Net.Sockets
                 {
                     Trace(context, $"Enter");
 
+                    if (_stopped)
+                    {
+                        Debug.Assert(_currentOperation == null);
+                        return;
+                    }
+
                     switch (_state)
                     {
                         case QueueState.Ready:
@@ -346,11 +352,6 @@ namespace System.Net.Sockets
                             Trace(context, $"Exit (currently processing)");
                             return;
 
-                        case QueueState.Stopped:
-                            Debug.Assert(_currentOperation == null);
-                            Trace(context, $"Exit (stopped)");
-                            return;
-
                         default:
                             Environment.FailFast("unexpected queue state");
                             return;
@@ -367,18 +368,16 @@ namespace System.Net.Sockets
                 {
                     Trace(op.AssociatedContext, $"Enter");
 
-                    if (_state == QueueState.Stopped)
+                    if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
                         return true;
                     }
-                    else
-                    {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                        Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
-                        _dataAvailable = false;
-                    }
+
+                    Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                    Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
+                    _dataAvailable = false;
                 }
 
                 return false;
@@ -397,26 +396,24 @@ namespace System.Net.Sockets
 
                 using (Lock())
                 {
-                    if (_state == QueueState.Stopped)
+                    if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
                         return (true, false);
                     }
+
+                    Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+
+                    if (_dataAvailable)
+                    {
+                        _dataAvailable = false;
+                    }
                     else
                     {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-
-                        if (_dataAvailable)
-                        {
-                            _dataAvailable = false;
-                        }
-                        else
-                        {
-                            _state = QueueState.Waiting;
-                            Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
-                            return (false, false);
-                        }
+                        _state = QueueState.Waiting;
+                        Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
+                        return (false, false);
                     }
                 }
 
@@ -427,7 +424,7 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
-                    if (_state == QueueState.Stopped)
+                    if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
                         Trace(op.AssociatedContext, $"Exit (stopped)");
@@ -453,7 +450,7 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    if (_state == QueueState.Stopped)
+                    if (_stopped)
                     {
                         Debug.Assert(_currentOperation == null);
                     }
@@ -487,15 +484,15 @@ namespace System.Net.Sockets
                 bool aborted = false;
 
                 // We should be called exactly once, by SafeSocketHandle.
-                Debug.Assert(_state != QueueState.Stopped);
+                Debug.Assert(!_stopped);
 
                 using (Lock())
                 {
                     Trace(context, $"Enter");
 
-                    Debug.Assert(_state != QueueState.Stopped);
+                    Debug.Assert(!_stopped);
 
-                    _state = QueueState.Stopped;
+                    _stopped = true;
 
                     if (_currentOperation != null)
                     {
