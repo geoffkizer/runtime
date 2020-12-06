@@ -456,6 +456,7 @@ namespace System.Net.Sockets
                 return isReady;
             }
 
+#if false
             // Return true for pending, false for completed synchronously (including failure and abort)
             public bool StartAsyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
             {
@@ -499,6 +500,8 @@ namespace System.Net.Sockets
                                 }
                                 else
                                 {
+                                    Debug.Fail("list is not empty");
+
                                     operation.Next = _tail.Next;
                                     _tail.Next = operation;
                                 }
@@ -542,6 +545,7 @@ namespace System.Net.Sockets
                     }
                 }
             }
+#endif
 
             // TODO: This is a modified version of above for sync operations.
             // It doesn't actually invoke the operation....
@@ -589,6 +593,8 @@ namespace System.Net.Sockets
                             }
                             else
                             {
+                                Debug.Fail("list is not empty");
+
                                 operation.Next = _tail.Next;
                                 _tail.Next = operation;
                             }
@@ -912,6 +918,8 @@ namespace System.Net.Sockets
                     }
                 }
 
+                Debug.Assert(nextOp == null, $"RemoveQueuedOperation: nextOp is not null");
+
                 nextOp?.Dispatch();
             }
 
@@ -992,6 +1000,8 @@ namespace System.Net.Sockets
                     }
                 }
 
+                Debug.Assert(nextOp == null, $"CancelAndContinueProcessing: nextOp is not null");
+
                 nextOp?.Dispatch();
             }
 
@@ -1018,6 +1028,9 @@ namespace System.Net.Sockets
                         {
                             aborted |= op.TryCancel();
                             op = op.Next;
+
+                            Debug.Assert(op == _tail, "StopAndAbort: unexpected queue");
+
                         } while (op != _tail);
                     }
 
