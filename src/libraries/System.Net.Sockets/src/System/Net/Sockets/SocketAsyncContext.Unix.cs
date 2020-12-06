@@ -37,6 +37,7 @@ namespace System.Net.Sockets
     internal sealed class SocketAsyncContext
     {
         // TODO: The whole AsyncOperation infrastructure should die.
+        // As far as I can tell, I really only need this for cancellation handling now, so look at how to get rid of that.
         private abstract class AsyncOperation
         {
             private enum State
@@ -48,10 +49,6 @@ namespace System.Net.Sockets
             }
 
             private int _state; // Actually AsyncOperation.State.
-
-#if DEBUG
-            private int _callbackQueued; // When non-zero, the callback has been queued.
-#endif
 
             public readonly SocketAsyncContext AssociatedContext;
             public SocketError ErrorCode;
@@ -66,14 +63,12 @@ namespace System.Net.Sockets
                 Reset();
             }
 
+            // This is only called from the constructor now, since we don't reuse operations
             public void Reset()
             {
                 _state = (int)State.Waiting;
                 Event = null;
                 CompletionSource = null;
-#if DEBUG
-                _callbackQueued = 0;
-#endif
             }
 
             public bool TrySetRunning()
@@ -175,6 +170,24 @@ namespace System.Net.Sockets
                 // Note, we leave the operation in the OperationQueue.
                 // When we get around to processing it, we'll see it's cancelled and skip it.
                 return true;
+            }
+
+            public void Signal()
+            {
+                ManualResetEventSlim? e = Event;
+                TaskCompletionSource<bool>? tcs = CompletionSource;
+                if (e != null)
+                {
+                    e.Set();
+                }
+                else if (tcs is not null)
+                {
+                    tcs.TrySetResult(false);
+                }
+                else
+                {
+                    Debug.Assert(false);
+                }
             }
 
             // Called when op is not in the queue yet, so can't be otherwise executing
@@ -409,6 +422,8 @@ namespace System.Net.Sockets
                             return (aborted: false, retry: false, observedSequenceNumber: 0);
 
                         case QueueState.Processing:
+                            // We should never be processing when a new operation arrives.
+                            // The semaphore should guarantee mutual exclusion in that regard.
                             Debug.Assert(false);
                             break;
 
@@ -482,21 +497,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                ManualResetEventSlim? e = op.Event;
-                TaskCompletionSource<bool>? tcs = op.CompletionSource;
-                if (e != null)
-                {
-                    // Sync operation.  Signal waiting thread to continue processing.
-                    e.Set();
-                }
-                else if (tcs is not null)
-                {
-                    tcs.TrySetResult(false);
-                }
-                else
-                {
-                    Debug.Assert(false);
-                }
+                op.Signal();
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
