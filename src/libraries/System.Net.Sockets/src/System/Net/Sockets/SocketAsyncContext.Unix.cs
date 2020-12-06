@@ -162,17 +162,8 @@ namespace System.Net.Sockets
             // If we successfully process all enqueued operations, then the state becomes Ready;
             // otherwise, the state becomes Waiting and we wait for another epoll notification.
 
-            private enum QueueState : int
-            {
-                Ready = 0,          // Indicates that data MAY be available on the socket.
-                                    // Queue must be empty.
-                Waiting = 1,        // Indicates that data is definitely not available on the socket.
-                                    // Queue must not be empty.
-            }
-
-            // These fields define the queue state.
-
-            private QueueState _state;      // See above
+            // This is probably kinda stupid, but maybe it's useful.
+            private bool _isReady;
 
             private bool _stopped;          // Replaces QueueState.Stopped
 
@@ -193,7 +184,7 @@ namespace System.Net.Sockets
                 Debug.Assert(_queueLock == null);
                 _queueLock = new object();
 
-                _state = QueueState.Ready;
+                _isReady = true;
                 _stopped = false;
                 _dataAvailable = true;
 
@@ -204,8 +195,6 @@ namespace System.Net.Sockets
             // observedSequenceNumber must be passed to StartAsyncOperation.
             public bool IsReady(SocketAsyncContext context)
             {
-                Debug.Assert(sizeof(QueueState) == sizeof(int));
-
                 using (Lock())
                 {
                     if (_stopped)
@@ -213,7 +202,7 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    if (_state == QueueState.Ready)
+                    if (_isReady)
                     {
                         _dataAvailable = false;
                         return true;
@@ -248,35 +237,27 @@ namespace System.Net.Sockets
                         return (aborted: true, retry: false);
                     }
 
-                    Debug.Assert(_state != QueueState.Waiting);
+                    Debug.Assert(_isReady);
 
-                    switch (_state)
+                    if (_dataAvailable)
                     {
-                        case QueueState.Ready:
-                            if (_dataAvailable)
-                            {
-                                // The queue has become ready again since we previously checked it.
-                                // So, we need to retry the operation before we enqueue it.
-                                _dataAvailable = false;
-                                Trace(context, $"Leave, signal retry");
-                                return (aborted: false, retry: true);
-                            }
-
-                            // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
-                            _state = QueueState.Waiting;
-
-                            // Enqueue the operation.
-                            Debug.Assert(_currentOperation == null);
-
-                            _currentOperation = operation;
-                            Trace(context, $"Leave, enqueued {IdOf(operation)}");
-
-                            return (aborted: false, retry: false);
-
-                        default:
-                            Environment.FailFast("unexpected queue state");
-                            return (true, false);
+                        // The queue has become ready again since we previously checked it.
+                        // So, we need to retry the operation before we enqueue it.
+                        _dataAvailable = false;
+                        Trace(context, $"Leave, signal retry");
+                        return (aborted: false, retry: true);
                     }
+
+                    // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
+                    _isReady = false;
+
+                    // Enqueue the operation.
+                    Debug.Assert(_currentOperation == null);
+
+                    _currentOperation = operation;
+                    Trace(context, $"Leave, enqueued {IdOf(operation)}");
+
+                    return (aborted: false, retry: false);
                 }
             }
 
@@ -298,31 +279,26 @@ namespace System.Net.Sockets
                         return;
                     }
 
-                    switch (_state)
+                    if (_isReady)
                     {
-                        case QueueState.Ready:
-                            Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
-                            _dataAvailable = true;
-                            Trace(context, $"Exit (previously ready)");
-                            return;
+                        Debug.Assert(_currentOperation == null, "State == Ready but queue is not empty!");
+                        _dataAvailable = true;
+                        Trace(context, $"Exit (previously ready)");
+                        return;
+                    }
+                    else
+                    {
+                        Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
+                        op = _currentOperation;
 
-                        case QueueState.Waiting:
-                            Debug.Assert(_currentOperation != null, "State == Waiting but queue is empty!");
-                            op = _currentOperation;
+                        // NOTE: We are always processing the op right now. See below.
 
-                            // NOTE: We are always processing the op right now. See below.
+                        _dataAvailable = true;
 
-                            _dataAvailable = true;
+                        // We used to transition to Processing here, but don't do that anymore.
+                        //_state = QueueState.Processing;
 
-                            // We used to transition to Processing here, but don't do that anymore.
-                            //_state = QueueState.Processing;
-
-                            // Break out and release lock
-                            break;
-
-                        default:
-                            Environment.FailFast("unexpected queue state");
-                            return;
+                        // Break out and release lock
                     }
                 }
 
@@ -343,7 +319,7 @@ namespace System.Net.Sockets
                         return true;
                     }
 
-                    Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
+                    Debug.Assert(!_isReady);
                     Debug.Assert(_currentOperation != null, "Unexpected empty queue while processing I/O");
                     _dataAvailable = false;
                     return false;
@@ -370,7 +346,7 @@ namespace System.Net.Sockets
                         return (true, false);
                     }
 
-                    Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
+                    Debug.Assert(!_isReady);
 
                     if (_dataAvailable)
                     {
@@ -396,13 +372,13 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        Debug.Assert(_state == QueueState.Waiting, $"_state={_state} while processing queue!");
+                        Debug.Assert(!_isReady);
 
                         Debug.Assert(op == _currentOperation);
 
                         // No more operations to process
                         _currentOperation = null;
-                        _state = QueueState.Ready;
+                        _isReady = true;
                         _dataAvailable = true;
                         Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
@@ -430,7 +406,7 @@ namespace System.Net.Sockets
                         _currentOperation = null;
 
                         // Just assume there is data available.
-                        _state = QueueState.Ready;
+                        _isReady = true;
                         _dataAvailable = true;
                     }
                 }
@@ -477,7 +453,7 @@ namespace System.Net.Sockets
                     typeof(TOperation) == typeof(WriteOperation) ? "send" :
                     "???";
 
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_state}-{_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
+                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
             }
         }
 
