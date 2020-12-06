@@ -768,7 +768,6 @@ namespace System.Net.Sockets
 
                 if (cancelled)
                 {
-                    state._operation.ErrorCode = SocketError.OperationAborted;
                     return (false, state);
                 }
 
@@ -968,7 +967,7 @@ namespace System.Net.Sockets
                         state._operation.OperationQueue.CancelAndContinueProcessing(state._operation);
 
                         state.Cleanup();
-                        return (false, state._operation.ErrorCode, state);
+                        return (false, SocketError.OperationAborted, state);
                     }
 
                     // We've been signalled to try to process the operation.
