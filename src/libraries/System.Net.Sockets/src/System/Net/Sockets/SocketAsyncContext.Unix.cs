@@ -259,7 +259,8 @@ namespace System.Net.Sockets
                                 // The queue has become ready again since we previously checked it.
                                 // So, we need to retry the operation before we enqueue it.
                                 _dataAvailable = false;
-                                break;
+                                Trace(context, $"Leave, signal retry");
+                                return (aborted: false, retry: true);
                             }
 
                             // Caller tried the operation and got an EWOULDBLOCK, so we need to transition.
@@ -279,18 +280,13 @@ namespace System.Net.Sockets
                             // We should never be processing when a new operation arrives.
                             // The semaphore should guarantee mutual exclusion in that regard.
                             Debug.Assert(false);
-                            break;
+                            return (true, false);
 
                         default:
                             Environment.FailFast("unexpected queue state");
-                            break;
+                            return (true, false);
                     }
                 }
-
-
-                // Tell the caller to retry the operation.
-                Trace(context, $"Leave, signal retry");
-                return (aborted: false, retry: true);
             }
 
             // Note, I changed the default of processAsyncEvents to false.
