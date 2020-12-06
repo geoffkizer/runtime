@@ -685,7 +685,6 @@ namespace System.Net.Sockets
 
                 if (!_operation.OperationQueue._semaphore.Wait(_timeout))
                 {
-                    _operation.ErrorCode = SocketError.TimedOut;
                     return false;
                 }
 
@@ -696,7 +695,6 @@ namespace System.Net.Sockets
 
                     if (_timeout <= 0)
                     {
-                        _operation.ErrorCode = SocketError.TimedOut;
                         ReleaseSemaphore();
                         return false;
                     }
@@ -731,7 +729,6 @@ namespace System.Net.Sockets
 
                 if (!_operation.Event!.Wait(_timeout))
                 {
-                    _operation.ErrorCode = SocketError.TimedOut;
                     return false;
                 }
 
@@ -745,7 +742,6 @@ namespace System.Net.Sockets
 
                     if (_timeout <= 0)
                     {
-                        _operation.ErrorCode = SocketError.TimedOut;
                         return false;
                     }
                 }
@@ -850,11 +846,11 @@ namespace System.Net.Sockets
 
                 if (!WaitForSyncSignal())
                 {
-                    // Timeout occurred. Error code is set.
+                    // Timeout occurred.
                     _operation.OperationQueue.CancelAndContinueProcessing(_operation);
 
                     Cleanup();
-                    return (false, _operation.ErrorCode);
+                    return (false, SocketError.TimedOut);
                 }
 
                 // We've been signalled to try to process the operation.
