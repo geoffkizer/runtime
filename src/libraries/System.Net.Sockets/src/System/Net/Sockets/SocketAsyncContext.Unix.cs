@@ -1975,39 +1975,64 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError ConnectAsync(byte[] socketAddress, int socketAddressLen, Action<SocketError> callback)
+        private async ValueTask<SocketError> InternalConnectAsync(byte[] socketAddress, int socketAddressLen, CancellationToken cancellationToken)
         {
-            Debug.Assert(socketAddress != null, "Expected non-null socketAddress");
-            Debug.Assert(socketAddressLen > 0, $"Unexpected socketAddressLen: {socketAddressLen}");
-            Debug.Assert(callback != null, "Expected non-null callback");
-
             SetNonBlocking();
+
+            SocketError errorCode;
 
             // Connect is different than the usual "readiness" pattern of other operations.
             // We need to initiate the connect before we try to complete it.
             // Thus, always call TryStartConnect regardless of readiness.
-            SocketError errorCode;
-            int observedSequenceNumber;
-            _sendQueue.IsReady(this, out observedSequenceNumber);
             if (SocketPal.TryStartConnect(_socket, socketAddress, socketAddressLen, out errorCode))
             {
                 _socket.RegisterConnectResult(errorCode);
                 return errorCode;
             }
 
-            var operation = new ConnectOperation(this)
+            var state = CreateAsyncWriteOperationState(cancellationToken);
+            while (true)
             {
-                Callback = callback,
-                SocketAddress = socketAddress,
-                SocketAddressLen = socketAddressLen
-            };
+                bool retry;
+                (retry, errorCode, state) = await WaitForWriteAsyncRetry(state).ConfigureAwait(false);
+                if (!retry)
+                {
+                    return errorCode;
+                }
 
-            if (!_sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber))
-            {
-                return operation.ErrorCode;
+                if (SocketPal.TryCompleteConnect(_socket, socketAddressLen, out errorCode))
+                {
+                    state.Complete();
+                    _socket.RegisterConnectResult(errorCode);
+                    return errorCode;
+                }
             }
+        }
 
-            return SocketError.IOPending;
+        public SocketError ConnectAsync(byte[] socketAddress, int socketAddressLen, Action<SocketError> callback)
+        {
+            ValueTask<SocketError> vt = InternalConnectAsync(socketAddress, socketAddressLen, CancellationToken.None);
+            bool completedSynchronously = vt.IsCompleted;
+
+            if (completedSynchronously)
+            {
+                SocketError socketError;
+                socketError = vt.GetAwaiter().GetResult();
+                return socketError;
+            }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    Debug.Assert(vt.IsCompleted);
+
+                    SocketError socketError;
+                    socketError = vt.GetAwaiter().GetResult();
+                    callback(socketError);
+                });
+
+                return SocketError.IOPending;
+            }
         }
 
         public SocketError Receive(Memory<byte> buffer, SocketFlags flags, int timeout, out int bytesReceived)
