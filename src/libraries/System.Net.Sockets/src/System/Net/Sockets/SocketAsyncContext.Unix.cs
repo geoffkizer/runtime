@@ -1517,6 +1517,8 @@ namespace System.Net.Sockets
         private static ValueTask<(bool, SocketError, SyncOperationState2<ReadOperation>)> WaitForReadAsyncRetry(SyncOperationState2<ReadOperation> state) =>
             SyncOperationState2<ReadOperation>.WaitForAsyncRetry(state);
 
+        private static ValueTask<(bool, SocketError, SyncOperationState2<WriteOperation>)> WaitForWriteAsyncRetry(SyncOperationState2<WriteOperation> state) =>
+            SyncOperationState2<WriteOperation>.WaitForAsyncRetry(state);
 
         //private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
         private const bool TraceEnabled = true;
@@ -2427,11 +2429,11 @@ namespace System.Net.Sockets
 
             int bytesSent = 0;
 
-            var state = CreateAsyncReadOperationState(cancellationToken);
+            var state = CreateAsyncWriteOperationState(cancellationToken);
             while (true)
             {
                 bool retry;
-                (retry, errorCode, state) = await WaitForReadAsyncRetry(state).ConfigureAwait(false);
+                (retry, errorCode, state) = await WaitForWriteAsyncRetry(state).ConfigureAwait(false);
                 if (!retry)
                 {
                     return (errorCode, default, default);
