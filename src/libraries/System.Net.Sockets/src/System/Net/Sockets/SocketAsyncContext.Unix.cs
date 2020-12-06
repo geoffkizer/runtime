@@ -1874,41 +1874,58 @@ namespace System.Net.Sockets
             }
         }
 
-        public SocketError AcceptAsync(byte[] socketAddress, ref int socketAddressLen, out IntPtr acceptedFd, Action<IntPtr, byte[], int, SocketError> callback)
+        private async ValueTask<(SocketError socketError, int socketAddressLen, IntPtr acceptedFd)> InternalAcceptAsync(byte[] socketAddress, int socketAddressLen, CancellationToken cancellationToken)
         {
-            Debug.Assert(socketAddress != null, "Expected non-null socketAddress");
-            Debug.Assert(socketAddressLen > 0, $"Unexpected socketAddressLen: {socketAddressLen}");
-            Debug.Assert(callback != null, "Expected non-null callback");
-
             SetNonBlocking();
 
             SocketError errorCode;
-            int observedSequenceNumber;
-            if (_receiveQueue.IsReady(this, out observedSequenceNumber) &&
-                SocketPal.TryCompleteAccept(_socket, socketAddress, ref socketAddressLen, out acceptedFd, out errorCode))
+
+            var state = CreateAsyncReadOperationState(cancellationToken);
+            while (true)
             {
-                Debug.Assert(errorCode == SocketError.Success || acceptedFd == (IntPtr)(-1), $"Unexpected values: errorCode={errorCode}, acceptedFd={acceptedFd}");
+                bool retry;
+                (retry, errorCode, state) = await WaitForReadAsyncRetry(state).ConfigureAwait(false);
+                if (!retry)
+                {
+                    return (errorCode, default, default);
+                }
 
-                return errorCode;
+                IntPtr acceptedFd;
+                if (SocketPal.TryCompleteAccept(_socket, socketAddress, ref socketAddressLen, out acceptedFd, out errorCode))
+                {
+                    state.Complete();
+                    return (errorCode, socketAddressLen, acceptedFd);
+                }
             }
+        }
 
-            AcceptOperation operation = RentAcceptOperation();
-            operation.Callback = callback;
-            operation.SocketAddress = socketAddress;
-            operation.SocketAddressLen = socketAddressLen;
+        public SocketError AcceptAsync(byte[] socketAddress, ref int socketAddressLen, out IntPtr acceptedFd, Action<IntPtr, byte[], int, SocketError> callback)
+        {
+            ValueTask<(SocketError socketError, int socketAddressLen, IntPtr acceptedFd)> vt = InternalAcceptAsync(socketAddress, socketAddressLen, CancellationToken.None);
+            bool completedSynchronously = vt.IsCompleted;
 
-            if (!_receiveQueue.StartAsyncOperation(this, operation, observedSequenceNumber))
+            if (completedSynchronously)
             {
-                socketAddressLen = operation.SocketAddressLen;
-                acceptedFd = operation.AcceptedFileDescriptor;
-                errorCode = operation.ErrorCode;
-
-                ReturnOperation(operation);
-                return errorCode;
+                SocketError socketError;
+                (socketError, socketAddressLen, acceptedFd) = vt.GetAwaiter().GetResult();
+                return socketError;
             }
+            else
+            {
+                vt.GetAwaiter().UnsafeOnCompleted(() =>
+                {
+                    Debug.Assert(vt.IsCompleted);
 
-            acceptedFd = (IntPtr)(-1);
-            return SocketError.IOPending;
+                    SocketError socketError;
+                    int socketAddressLen;
+                    IntPtr acceptedFd;
+                    (socketError, socketAddressLen, acceptedFd) = vt.GetAwaiter().GetResult();
+                    callback(acceptedFd, socketAddress, socketAddressLen, socketError);
+                });
+
+                acceptedFd = default;
+                return SocketError.IOPending;
+            }
         }
 
         public SocketError Connect(byte[] socketAddress, int socketAddressLen)
