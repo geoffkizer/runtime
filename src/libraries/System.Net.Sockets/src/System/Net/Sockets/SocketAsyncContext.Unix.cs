@@ -198,7 +198,7 @@ namespace System.Net.Sockets
 
                 _state = QueueState.Ready;
                 _stopped = false;
-                _dataAvailable = false;
+                _dataAvailable = true;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
