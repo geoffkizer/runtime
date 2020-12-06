@@ -658,7 +658,7 @@ namespace System.Net.Sockets
                     {
                         AsyncOperation op = _tail;
 
-                        op.Signal(true);
+                        op.TryCancel();
 
                         aborted = true;
                     }
