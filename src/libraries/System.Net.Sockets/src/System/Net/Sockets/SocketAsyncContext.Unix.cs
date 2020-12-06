@@ -292,11 +292,6 @@ namespace System.Net.Sockets
                 }
             }
 
-            public void CompleteQueuedOperation(TOperation op)
-            {
-                RemoveQueuedOperation(op);
-            }
-
             // We tried the op and it didn't complete.
             // Set it to pend again, unless we need to retry again
             public (bool cancelled, bool retry) PendQueuedOperation(TOperation op)
@@ -324,27 +319,6 @@ namespace System.Net.Sockets
                         _currentOperation = op;
                         Trace(op.AssociatedContext, $"Exit (received EAGAIN)");
                         return (false, false);
-                    }
-                }
-            }
-
-            public void RemoveQueuedOperation(TOperation op)
-            {
-                using (Lock())
-                {
-                    if (_stopped)
-                    {
-                        Debug.Assert(_currentOperation == null);
-                        Trace(op.AssociatedContext, $"Exit (stopped)");
-                    }
-                    else
-                    {
-                        Debug.Assert(_currentOperation == null);
-
-                        // No more operations to process
-                        // TODO: Does this make sense? Probably not
-                        _dataAvailable = true;
-                        Trace(op.AssociatedContext, $"Exit (finished queue)");
                     }
                 }
             }
@@ -894,11 +868,6 @@ namespace System.Net.Sockets
 
             public void Complete()
             {
-                if (_isInQueue)
-                {
-                    _operation.OperationQueue.CompleteQueuedOperation(_operation);
-                }
-
                 Cleanup();
             }
 
