@@ -52,14 +52,6 @@ namespace System.Net.Sockets
                 CompletionSource = null;
             }
 
-            // This is called from StopAndAbort
-            public void TryCancel()
-            {
-                Signal();
-            }
-
-            // TODO: I don't think I should need to explicitly pass [cancel] here.
-            // The receiver of the signal should check the state and determine it's a cancellation.
             public void Signal()
             {
                 ManualResetEventSlim? e = Event;
@@ -483,7 +475,7 @@ namespace System.Net.Sockets
                     {
                         AsyncOperation op = _currentOperation;
 
-                        op.TryCancel();
+                        op.Signal();
 
                         aborted = true;
                     }
