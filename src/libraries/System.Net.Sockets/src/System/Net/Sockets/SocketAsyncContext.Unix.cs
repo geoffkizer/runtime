@@ -440,17 +440,9 @@ namespace System.Net.Sockets
                         // No more operations
                         _currentOperation = null;
 
-                        // We're the first op in the queue.
-                        if (_state == QueueState.Processing)
-                        {
-                            _state = QueueState.Ready;
-                            _dataAvailable = true;
-                        }
-                        else if (_state == QueueState.Waiting)
-                        {
-                            _state = QueueState.Ready;
-                            _dataAvailable = true;
-                        }
+                        // Just assume there is data available.
+                        _state = QueueState.Ready;
+                        _dataAvailable = true;
                     }
                 }
             }
