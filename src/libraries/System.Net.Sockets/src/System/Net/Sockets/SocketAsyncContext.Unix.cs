@@ -261,7 +261,7 @@ namespace System.Net.Sockets
             }
 
             // Called when the socket is closed.
-            public bool StopAndAbort(SocketAsyncContext context)
+            public bool StopAndAbort()
             {
                 bool aborted = false;
 
@@ -343,8 +343,8 @@ namespace System.Net.Sockets
             bool aborted = false;
 
             // Drain queues
-            aborted |= _sendQueue.StopAndAbort(this);
-            aborted |= _receiveQueue.StopAndAbort(this);
+            aborted |= _sendQueue.StopAndAbort();
+            aborted |= _receiveQueue.StopAndAbort();
 
             // We don't need to synchronize with Register.
             // This method is called when the handle gets released.
