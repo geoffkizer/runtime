@@ -457,28 +457,20 @@ namespace System.Net.Sockets
 
             public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
             {
-                Print($"SyncOperationState2 constr: timeout = {timeout}");
-
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
-                Print($"SyncOperationState2 constr: DateTime.UtcNow = {DateTime.UtcNow}");
-
                 _expiration = timeout == -1 ? null : DateTime.UtcNow.AddMilliseconds(timeout);
-
-                Print($"SyncOperationState2 constr: _expiration = {_expiration}");
 
                 _cancellationToken = cancellationToken;
 
                 _isStarted = false;
 
                 _operation = operation;
-
-                Print($"SyncOperationState2 constr exit: CurrentTimeout = {CurrentTimeout}");
             }
 
             private int CurrentTimeout =>
                 (_expiration is null) ? -1 :
-                Math.Max((int)(_expiration.Value - DateTime.UtcNow).TotalMilliseconds, 0);
+                Math.Max((int)(_expiration.Value - DateTime.UtcNow).Ticks, 0);
 
             // TODO: Consider separating the timeout adjustment into a helper, and use it for waiting on data signal too.
 
