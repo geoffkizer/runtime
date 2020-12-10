@@ -207,7 +207,6 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
-                    Debug.Assert(_dataAvailable == false);
                     Debug.Assert(_currentOperation == null);
 
                     _dataAvailable = true;
@@ -245,11 +244,19 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    // Clear out current operation; it's been canceled
-                    _currentOperation = null;
+                    // Readiness state right now could be:
+                    // (1) Not ready; in which case we should be the waiting callback
+                    // (2) Ready, with presumably our callback invoked
 
-                    // Just assume there is data available.
-                    _dataAvailable = true;
+                    if (_dataAvailable == false)
+                    {
+                        Debug.Assert(_currentOperation is not null);
+                        _currentOperation = null;
+                    }
+                    else
+                    {
+                        Debug.Assert(_currentOperation is null);
+                    }
                 }
             }
 
@@ -617,7 +624,7 @@ namespace System.Net.Sockets
 
                     if (!success)
                     {
-                        // Cancellation occurred. Error code is set.
+                        // CancellationToken was canceled.
                         state._operation.OperationQueue.CancelAndContinueProcessing();
 
                         state.Cleanup();
