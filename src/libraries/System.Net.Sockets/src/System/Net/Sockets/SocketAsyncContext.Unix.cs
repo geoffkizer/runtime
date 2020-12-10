@@ -246,7 +246,7 @@ namespace System.Net.Sockets
             }
 
             // Returns true if cancelled or queue stopped, false if op should be tried
-            public bool GetQueuedOperationStatus()
+            public void GetQueuedOperationStatus()
             {
                 using (Lock())
                 {
@@ -254,7 +254,6 @@ namespace System.Net.Sockets
 
                     // Reset _dataAvailable for subsequent attempts
                     _dataAvailable = false;
-                    return false;
                 }
             }
 
@@ -601,7 +600,6 @@ namespace System.Net.Sockets
             // False means cancellation (or timeout); error is in [socketError]
             public (bool retry, SocketError socketError) WaitForSyncRetry()
             {
-                bool cancelled;
                 bool retry;
 
                 if (!_isStarted)
@@ -660,12 +658,7 @@ namespace System.Net.Sockets
                 }
 
                 // We've been signalled to try to process the operation.
-                cancelled = _operation.OperationQueue.GetQueuedOperationStatus();
-                if (cancelled)
-                {
-                    Cleanup();
-                    return (false, SocketError.OperationAborted);
-                }
+                _operation.OperationQueue.GetQueuedOperationStatus();
 
                 return (true, default);
             }
@@ -686,7 +679,6 @@ namespace System.Net.Sockets
 
             public static async ValueTask<(bool retry, SocketError socketError, SyncOperationState2<T> state)> WaitForAsyncRetry(SyncOperationState2<T> state)
             {
-                bool cancelled;
                 bool retry;
 
                 // temporary -- should be unnecessary, revisit later
@@ -762,14 +754,7 @@ namespace System.Net.Sockets
                     }
 
                     // We've been signalled to try to process the operation.
-                    cancelled = state._operation.OperationQueue.GetQueuedOperationStatus();
-                    if (cancelled)
-                    {
-                        Print($"--- WaitForAsyncRetry: GetQueuedOperationStatus returned cancelled; return false");
-
-                        state.Cleanup();
-                        return (false, SocketError.OperationAborted, state);
-                    }
+                    state._operation.OperationQueue.GetQueuedOperationStatus();
 
                     Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
 
