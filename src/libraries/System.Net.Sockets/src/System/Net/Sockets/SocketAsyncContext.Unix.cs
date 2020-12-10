@@ -565,7 +565,7 @@ namespace System.Net.Sockets
                     Cleanup();
                     return (false, SocketError.TimedOut);
                 }
-    
+
                 // This needs to get deferred until after the initial attempt, because we don't want to actually register for epoll
                 // if we are in sync mode, i.e. not non-blocking. The call to ShouldRetrySyncOperation above should guarantee that.
                 // TODO: This could go somewhere else
