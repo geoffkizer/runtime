@@ -303,6 +303,7 @@ namespace System.Net.Sockets
             {
                 bool aborted = false;
 
+                AsyncOperation? toSignal = null;
                 using (Lock())
                 {
                     Trace(context, $"Enter");
@@ -310,17 +311,18 @@ namespace System.Net.Sockets
                     // TODO: This should just call Signal or whatever
                     if (_currentOperation != null)
                     {
-                        AsyncOperation op = _currentOperation;
+                        toSignal = _currentOperation;
+                        _currentOperation = null;
 
-                        op.Signal();
+                        _dataAvailable = true;
 
                         aborted = true;
                     }
 
-                    _currentOperation = null;
-
                     Trace(context, $"Exit");
                 }
+
+                toSignal?.Signal();
 
                 return aborted;
             }
