@@ -239,14 +239,27 @@ namespace System.Net.Sockets
                 }
             }
 
+            // TODO: "DataAvailable" is an inappropriate term for sending.
+            // Consider changing this to something like "Ready"
+
+            // This is called after an operation completes and we believe there's still more data available,
+            // so that the next operation will proceed immediately without waiting for a data notification.
+            public void SetDataAvailable()
+            {
+                using (Lock())
+                {
+                    Debug.Assert(_currentOperation == null);
+
+                    _dataAvailable = true;
+                }
+            }
+
             // Return true if pending needed, false if not
             // If [true] is returned, [op] will not be signalled
             // If [false] is returned, [op] will be signalled on a callback-capable thread
             // TODO: Should this take Action, or Action<object> + state?
             public bool WaitForDataAvailable(TOperation op)
             {
-                // Check for retry and reset queue state.
-
                 using (Lock())
                 {
                     Debug.Assert(_currentOperation == null);
@@ -764,6 +777,8 @@ namespace System.Net.Sockets
 
             public void Complete()
             {
+                // We completed the operation. So we need to set data available so the next operation will try immediately.
+                _operation.OperationQueue.SetDataAvailable();
                 Cleanup();
             }
 
