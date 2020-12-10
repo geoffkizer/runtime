@@ -209,6 +209,7 @@ namespace System.Net.Sockets
 
 
 
+#if false
             // TODO:
             // Push the context regsitration into caller,
             // and get rid of this routine -- call PendQueuedOperation instead.
@@ -223,6 +224,7 @@ namespace System.Net.Sockets
 
                 return PendQueuedOperation(operation);
             }
+#endif
 
             // Note, I changed the default of processAsyncEvents to false.
             // I believe this is more correct, but it's still a change in behavior...
@@ -496,6 +498,8 @@ namespace System.Net.Sockets
                 _operation = operation;
             }
 
+            // TODO: Consider separating the timeout adjustment into a helper, and use it for waiting on data signal too.
+
             private bool WaitForSemaphoreSync()
             {
                 DateTime waitStart = DateTime.UtcNow;
@@ -566,10 +570,6 @@ namespace System.Net.Sockets
                 return true;
             }
 
-            // Note we don't handle cancellation here, for now at least.
-            // It will be handled by going through the AsyncOperation.TryCancel path.
-            // We probably want to revist this, but not yet.
-
             private static async ValueTask<(bool, SyncOperationState2<T>)> WaitForAsyncSignal(SyncOperationState2<T> state)
             {
                 Debug.Assert(state._operation.CompletionSource is not null);
@@ -629,7 +629,13 @@ namespace System.Net.Sockets
                     // Allocate the event we will wait on
                     _operation.Event = new ManualResetEventSlim(false, 0);
 
-                    retry = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation);
+                    // TODO: This could go somewhere else
+                    if (!_operation.AssociatedContext.IsRegistered)
+                    {
+                        _operation.AssociatedContext.Register();
+                    }
+
+                    retry = _operation.OperationQueue.PendQueuedOperation(_operation);
                     if (retry)
                     {
                         return (true, default);
@@ -716,7 +722,13 @@ namespace System.Net.Sockets
                         // Allocate the TCS we will wait on
                         state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        retry = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation);
+                        // TODO: This could go somewhere else
+                        if (!state._operation.AssociatedContext.IsRegistered)
+                        {
+                            state._operation.AssociatedContext.Register();
+                        }
+
+                        retry = state._operation.OperationQueue.PendQueuedOperation(state._operation);
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
