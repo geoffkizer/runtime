@@ -237,25 +237,21 @@ namespace System.Net.Sockets
             }
 
             // This is only called in the case of sync timeout or async cancellation via CancellationToken.
-            // All it really does now is set _dataAvailable =true; is that worthwhile?
+            // In that case, we will be racing with the epoll notification to determine who will notify the waiter.
             public void CancelAndContinueProcessing()
             {
-                // Remove operation from queue.
-                // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    // Readiness state right now could be:
-                    // (1) Not ready; in which case we should be the waiting callback
-                    // (2) Ready, with presumably our callback invoked
-
-                    if (_dataAvailable == false)
+                    if (_currentOperation is null)
                     {
-                        Debug.Assert(_currentOperation is not null);
-                        _currentOperation = null;
+                        // The epoll thread won the race and notified the waiter already.
+                        Debug.Assert(_dataAvailable);
                     }
                     else
                     {
-                        Debug.Assert(_currentOperation is null);
+                        // We won the race. Clear out the waiter so the epoll thread won't notify it.
+                        Debug.Assert(!_dataAvailable);
+                        _currentOperation = null;
                     }
                 }
             }
