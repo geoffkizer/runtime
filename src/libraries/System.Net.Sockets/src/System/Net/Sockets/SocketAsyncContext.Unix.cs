@@ -285,6 +285,8 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
+                    Debug.Assert(_currentOperation == null);
+
                     // Clear out current operation; it's been canceled
                     _currentOperation = null;
 
