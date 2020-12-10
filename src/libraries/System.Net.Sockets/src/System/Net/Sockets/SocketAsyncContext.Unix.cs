@@ -550,11 +550,6 @@ namespace System.Net.Sockets
                         // Just let it proceed. But also, see below.
                         return (true, default);
                     }
-
-                    if (_operation.OperationQueue.IsReady(_operation.AssociatedContext))
-                    {
-                        return (true, default);
-                    }
                 }
                 else
                 {
@@ -579,7 +574,6 @@ namespace System.Net.Sockets
                 // Allocate the event we will wait on
                 // TODO: This is suboptimal, obviously...
                 _operation.Event = new ManualResetEventSlim(false, 0);
-
 
                 retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
                 if (retry)
@@ -634,10 +628,6 @@ namespace System.Net.Sockets
                         }
 
                         state._isStarted = true;
-                        if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext))
-                        {
-                            return (true, default, state);
-                        }
                     }
 
                     // Allocate the TCS we will wait on
