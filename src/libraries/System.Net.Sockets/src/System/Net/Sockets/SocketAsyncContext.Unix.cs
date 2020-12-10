@@ -615,7 +615,8 @@ namespace System.Net.Sockets
 
                 if (!_isInQueue)
                 {
-                    // TODO: Look at this
+                    // This is a test to determine if the EWOULDBLOCK we received previously
+                    // was an actual timeout on a blocking socket, or just a regular EWOULDBLOCK on a non-blocking socket.
                     SocketError errorCode;
                     if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                     {
