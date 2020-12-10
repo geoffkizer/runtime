@@ -457,7 +457,6 @@ namespace System.Net.Sockets
 
             public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
             {
-
                 Print($"SyncOperationState2 constr: timeout = {timeout}");
 
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
@@ -469,6 +468,8 @@ namespace System.Net.Sockets
                 _isStarted = false;
 
                 _operation = operation;
+
+                Print($"SyncOperationState2 constr exit: CurrentTimeout = {CurrentTimeout}");
             }
 
             private int CurrentTimeout =>
@@ -630,7 +631,6 @@ namespace System.Net.Sockets
                         state._isStarted = true;
                         if (state._operation.OperationQueue.IsReady(state._operation.AssociatedContext))
                         {
-                            Print($"--- WaitForAsyncRetry: IsReady == true, return true");
                             return (true, default, state);
                         }
                     }
@@ -659,8 +659,6 @@ namespace System.Net.Sockets
 
                     // We've been signalled to try to process the operation.
                     state._operation.OperationQueue.StartOperation();
-
-                    Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
 
                     return (true, default, state);
                 }
