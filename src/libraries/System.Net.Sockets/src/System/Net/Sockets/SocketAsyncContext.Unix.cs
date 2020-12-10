@@ -147,8 +147,13 @@ namespace System.Net.Sockets
             public SemaphoreSlim _semaphore;
             // TODO: This is not getting disposed currently.
 
-            // This replaces the old sequence number.
-            private bool _dataAvailable;
+            // Here's how _waiterCallback works.
+            // If null, we are ready; caller should attempt the operation.
+            // If s_notReadySentinel, we are not ready, but there's no current waiter.
+            // Otherwise, we are not ready and this value is the waiter.
+
+            // Sentinel for not ready, but no waiter currently
+            private static readonly Action s_notReadySentinel = () => { };
 
             // TODO: This is causing unnecessary allocation in callers; consider how to make this more efficient.
             // The trickiness here is that I'm using this delegate reference for interlocked operations.
@@ -169,57 +174,51 @@ namespace System.Net.Sockets
                 Debug.Assert(_queueLock == null);
                 _queueLock = new object();
 
-                _dataAvailable = true;
                 _waiterCallback = null;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
 
+            // Called by the epoll thread.
             public void OnReady()
             {
-                Action? waiterCallback = null;
-                using (Lock())
-                {
-                    _dataAvailable = true;
-                    if (_waiterCallback is not null)
-                    {
-                        waiterCallback = _waiterCallback;
-                        _waiterCallback = null;
-                    }
-                }
-
-                if (waiterCallback is not null)
+                // Set ready and retrieve current waiter, if any.
+                Action? waiterCallback = Interlocked.Exchange(ref _waiterCallback, null);
+                if (waiterCallback is not null && waiterCallback != s_notReadySentinel)
                 {
                     waiterCallback();
                 }
             }
 
+            // ALSO: Is the interaction between StartOperation (in callers or in WaitForDataAvailable)
+            // and cancellation correct?
+            // I'm worried about something like this:
+            // - StartOperation is invoked, setting state = not ready
+            // Caller determines cancellation and never actually invokes the op
+            // Is this an issue in practice? Check.
+
+            // TODO: WHere is this called, outside of WaitForDataAvailable below?
+            // And should those callers just be calling WaitForDataAvailable?
+
             // This is called when we are about to try the operation, after a notification has been received.
+            // We set the state to not ready, so that any subsequent epoll notification will change it to ready again,
+            // and we can retry in WaitForDataAvailable below.
             public void StartOperation()
             {
-                using (Lock())
-                {
-                    Debug.Assert(_dataAvailable == true);
-                    Debug.Assert(_waiterCallback == null);
-
-                    // Reset _dataAvailable for subsequent attempts
-                    _dataAvailable = false;
-                }
+                Debug.Assert(_waiterCallback == null);
+                Volatile.Write(ref _waiterCallback, s_notReadySentinel);
             }
 
             // TODO: "DataAvailable" is an inappropriate term for sending.
             // Consider changing this to something like "Ready"
 
             // This is called after an operation completes and we believe there's still more data available,
+            // (which is always today, but this could change in the future,)
             // so that the next operation will proceed immediately without waiting for a data notification.
             public void SetDataAvailable()
             {
-                using (Lock())
-                {
-                    Debug.Assert(_waiterCallback == null);
-
-                    _dataAvailable = true;
-                }
+                Debug.Assert(_waiterCallback is null || _waiterCallback == s_notReadySentinel);
+                Volatile.Write(ref _waiterCallback, null);
             }
 
             // TODO: COnsider combining this with the wait sync/async logic in caller.
@@ -229,41 +228,44 @@ namespace System.Net.Sockets
             // TODO: Should this take Action, or Action<object> + state?
             public bool WaitForDataAvailable(Action waiterCallback)
             {
-                using (Lock())
-                {
-                    Debug.Assert(_waiterCallback == null);
+                Action? previous = Interlocked.CompareExchange(ref _waiterCallback, waiterCallback, s_notReadySentinel);
 
-                    if (_dataAvailable)
-                    {
-                        _dataAvailable = false;
-                        return true;
-                    }
-                    else
-                    {
-                        _waiterCallback = waiterCallback;
-                        return false;
-                    }
+                if (previous is null)
+                {
+                    // We received an intervening epoll notification that indicated readiness again.
+                    StartOperation();
+                    return true;
                 }
+
+                Debug.Assert(previous == s_notReadySentinel);
+                return false;
             }
 
             // This is only called in the case of sync timeout or async cancellation via CancellationToken.
-            // In that case, we will be racing with the epoll notification to determine who will notify the waiter.
+            // The wait has already been interrupted via sync timeout or async CancellationToken.
+            // We need to unregister the waiter, but we are also racing with the epoll thread to notify the waiter.
             public void CancelAndContinueProcessing()
             {
-                using (Lock())
+                Action? waiterCallback = Volatile.Read(ref _waiterCallback);
+                if (waiterCallback is null)
                 {
-                    if (_waiterCallback is null)
-                    {
-                        // The epoll thread won the race and notified the waiter already.
-                        Debug.Assert(_dataAvailable);
-                    }
-                    else
-                    {
-                        // We won the race. Clear out the waiter so the epoll thread won't notify it.
-                        Debug.Assert(!_dataAvailable);
-                        _waiterCallback = null;
-                    }
+                    // Epoll thread already notified the waiter
+                    // Leave the state as ready for the next operation
+                    return;
                 }
+
+                Debug.Assert(waiterCallback != s_notReadySentinel);
+
+                // Try to unregister the waiter and set the state to not ready, for the next operation.
+                waiterCallback = Interlocked.CompareExchange(ref _waiterCallback, s_notReadySentinel, waiterCallback);
+                if (waiterCallback is null)
+                {
+                    // Epoll thread already notified the waiter
+                    // Leave the state as ready for the next operation
+                    return;
+                }
+
+                Debug.Assert(waiterCallback != s_notReadySentinel);
             }
 
             // Called when the socket is closed.
@@ -271,23 +273,11 @@ namespace System.Net.Sockets
             {
                 bool aborted = false;
 
-                Action? waiterCallback = null;
-                using (Lock())
+                // Set ready and retrieve current waiter, if any.
+                Action? waiterCallback = Interlocked.Exchange(ref _waiterCallback, null);
+                if (waiterCallback is not null && waiterCallback != s_notReadySentinel)
                 {
-                    // TODO: This should just call Signal or whatever
-                    if (_waiterCallback != null)
-                    {
-                        waiterCallback = _waiterCallback;
-                        _waiterCallback = null;
-
-                        _dataAvailable = true;
-
-                        aborted = true;
-                    }
-                }
-
-                if (waiterCallback is not null)
-                {
+                    aborted = true;
                     waiterCallback();
                 }
 
