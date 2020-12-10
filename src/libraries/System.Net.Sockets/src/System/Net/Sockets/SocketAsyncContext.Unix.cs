@@ -545,16 +545,6 @@ namespace System.Net.Sockets
                     }
                 }
 
-                // This is a test to determine if the EWOULDBLOCK we received previously
-                // was an actual timeout on a blocking socket, or just a regular EWOULDBLOCK on a non-blocking socket.
-                // TODO: This works today because IsReady above never returns false. But it could, and we should handle this differently...
-                SocketError errorCode;
-                if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
-                {
-                    Cleanup();
-                    return (false, errorCode);
-                }
-
                 // TODO: This could go somewhere else
                 if (!_operation.AssociatedContext.IsRegistered)
                 {
