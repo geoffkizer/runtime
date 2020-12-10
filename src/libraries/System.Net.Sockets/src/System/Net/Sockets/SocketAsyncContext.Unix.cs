@@ -451,7 +451,7 @@ namespace System.Net.Sockets
             where T : AsyncOperation2<T>
         {
             private bool _isStarted;    // TODO: Consider promoting the lock handling to callers
-            private int _timeout;
+            private DateTime? _expiration;
             private CancellationToken _cancellationToken;
             private T _operation;
 
@@ -459,7 +459,8 @@ namespace System.Net.Sockets
             {
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
-                _timeout = timeout;
+                _expiration = timeout == -1 ? null : DateTime.UtcNow.AddMilliseconds(timeout);
+
                 _cancellationToken = cancellationToken;
 
                 _isStarted = false;
@@ -467,30 +468,15 @@ namespace System.Net.Sockets
                 _operation = operation;
             }
 
+            private int CurrentTimeout =>
+                (_expiration is null) ? -1 :
+                Math.Max((_expiration.Value - DateTime.UtcNow).Milliseconds, 0);
+
             // TODO: Consider separating the timeout adjustment into a helper, and use it for waiting on data signal too.
 
             private bool WaitForSemaphoreSync()
             {
-                DateTime waitStart = DateTime.UtcNow;
-
-                if (!_operation.OperationQueue._semaphore.Wait(_timeout))
-                {
-                    return false;
-                }
-
-                // Adjust timeout for next attempt.
-                if (_timeout > 0)
-                {
-                    _timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                    if (_timeout <= 0)
-                    {
-                        ReleaseSemaphore();
-                        return false;
-                    }
-                }
-
-                return true;
+                return _operation.OperationQueue._semaphore.Wait(CurrentTimeout);
             }
 
             private async ValueTask<bool> WaitForSemaphoreAsync()
@@ -515,25 +501,7 @@ namespace System.Net.Sockets
             // TODO: COuld be merged below?
             private bool WaitForSyncSignal()
             {
-                DateTime waitStart = DateTime.UtcNow;
-
-                if (!_operation.Event!.Wait(_timeout))
-                {
-                    return false;
-                }
-
-                // Adjust timeout for next attempt.
-                if (_timeout > 0)
-                {
-                    _timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                    if (_timeout <= 0)
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
+                return _operation.Event!.Wait(CurrentTimeout);
             }
 
             private static async ValueTask<(bool, SyncOperationState2<T>)> WaitForAsyncSignal(SyncOperationState2<T> state)
