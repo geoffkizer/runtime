@@ -576,7 +576,7 @@ namespace System.Net.Sockets
                         return (true, default);
                     }
                 }
-                
+
                 // TODO: This could go somewhere else
                 if (!_operation.AssociatedContext.IsRegistered)
                 {
