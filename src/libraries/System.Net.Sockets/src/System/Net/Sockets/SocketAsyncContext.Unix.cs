@@ -233,6 +233,7 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
+                    Debug.Assert(_dataAvailable == true);
                     Debug.Assert(_currentOperation == null);
 
                     // Reset _dataAvailable for subsequent attempts
