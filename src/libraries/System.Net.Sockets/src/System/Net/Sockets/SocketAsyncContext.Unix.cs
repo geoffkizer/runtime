@@ -451,7 +451,6 @@ namespace System.Net.Sockets
             where T : AsyncOperation2<T>
         {
             private bool _isStarted;            // TODO: these should be combined into a single state? But I probably should look at stuff like StartSyncOperation in more detail
-            private bool _isInQueue;
             private int _timeout;
             private CancellationToken _cancellationToken;
             private T _operation;
@@ -464,7 +463,6 @@ namespace System.Net.Sockets
                 _cancellationToken = cancellationToken;
 
                 _isStarted = false;
-                _isInQueue = false;
 
                 _operation = operation;
             }
@@ -524,9 +522,6 @@ namespace System.Net.Sockets
                     return false;
                 }
 
-                // Reset the event now to avoid lost notifications if the processing is unsuccessful.
-                _operation.Event!.Reset();
-
                 // Adjust timeout for next attempt.
                 if (_timeout > 0)
                 {
@@ -559,11 +554,6 @@ namespace System.Net.Sockets
                     return (false, state);
                 }
 
-                // Reallocate the TCS now to avoid lost notifications if the processing is unsuccessful.
-                // TODO: Obviously this is suboptimal, not clear what's better; revisit later
-
-                state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
                 return (true, state);
             }
 
@@ -587,42 +577,31 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (!_isInQueue)
+                // This is a test to determine if the EWOULDBLOCK we received previously
+                // was an actual timeout on a blocking socket, or just a regular EWOULDBLOCK on a non-blocking socket.
+                // TODO: This works today because IsReady above never returns false. But it could, and we should handle this differently...
+                SocketError errorCode;
+                if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
                 {
-                    // This is a test to determine if the EWOULDBLOCK we received previously
-                    // was an actual timeout on a blocking socket, or just a regular EWOULDBLOCK on a non-blocking socket.
-                    SocketError errorCode;
-                    if (!_operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
-                    {
-                        Cleanup();
-                        return (false, errorCode);
-                    }
-
-                    // Allocate the event we will wait on
-                    _operation.Event = new ManualResetEventSlim(false, 0);
-
-                    // TODO: This could go somewhere else
-                    if (!_operation.AssociatedContext.IsRegistered)
-                    {
-                        _operation.AssociatedContext.Register();
-                    }
-
-                    retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
-                    if (retry)
-                    {
-                        return (true, default);
-                    }
-
-                    _isInQueue = true;
+                    Cleanup();
+                    return (false, errorCode);
                 }
-                else
+
+                // TODO: This could go somewhere else
+                if (!_operation.AssociatedContext.IsRegistered)
                 {
-                    // We just tried to execute the queued operation, but it failed.
-                    retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
-                    if (retry)
-                    {
-                        return (true, default);
-                    }
+                    _operation.AssociatedContext.Register();
+                }
+
+                // Allocate the event we will wait on
+                // TODO: This is suboptimal, obviously...
+                _operation.Event = new ManualResetEventSlim(false, 0);
+
+
+                retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
+                if (retry)
+                {
+                    return (true, default);
                 }
 
                 if (!WaitForSyncSignal())
@@ -658,9 +637,11 @@ namespace System.Net.Sockets
             {
                 bool retry;
 
-                // temporary -- should be unnecessary, revisit later
-
-                Print($"--- Enter WaitForAsyncRetry");
+                // TODO: This could go somewhere else
+                if (!state._operation.AssociatedContext.IsRegistered)
+                {
+                    state._operation.AssociatedContext.Register();
+                }
 
                 try
                 {
@@ -681,46 +662,14 @@ namespace System.Net.Sockets
                         }
                     }
 
-                    if (!state._isInQueue)
+                    // Allocate the TCS we will wait on
+                    // TODO: We don't always wait on this (i.e. retry) -- need to be better about how we allocate this.
+                    state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                    retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
+                    if (retry)
                     {
-                        // TODO: This doesn't make any sense for async operations,
-                        // but since it only acts when the socket is blocking, it shouldn't actually do any harm.
-                        SocketError errorCode;
-                        if (!state._operation.AssociatedContext.ShouldRetrySyncOperation(out errorCode))
-                        {
-                            state.Cleanup();
-                            return (false, errorCode, state);
-                        }
-
-                        // Allocate the TCS we will wait on
-                        state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-                        // TODO: This could go somewhere else
-                        if (!state._operation.AssociatedContext.IsRegistered)
-                        {
-                            state._operation.AssociatedContext.Register();
-                        }
-
-                        retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
-                        if (retry)
-                        {
-                            Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
-
-                            return (true, default, state);
-                        }
-
-                        state._isInQueue = true;
-                    }
-                    else
-                    {
-                        // We just tried to execute the queued operation, but it failed.
-                        retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
-                        if (retry)
-                        {
-                            Print($"--- WaitForAsyncRetry: PendQueuedOperation returned retry, return true");
-
-                            return (true, default, state);
-                        }
+                        return (true, default, state);
                     }
 
                     bool success;
@@ -728,8 +677,6 @@ namespace System.Net.Sockets
 
                     if (!success)
                     {
-                        Print($"--- WaitForAsyncRetry: WaitForAsyncSignal returned false; cancel and return false");
-
                         // Cancellation occurred. Error code is set.
                         state._operation.OperationQueue.CancelAndContinueProcessing();
 
