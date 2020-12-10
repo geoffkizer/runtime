@@ -228,7 +228,8 @@ namespace System.Net.Sockets
                 }
             }
 
-            public void GetQueuedOperationStatus()
+            // This is called when we are about to try the operation, after a notification has been received.
+            public void StartOperation()
             {
                 using (Lock())
                 {
@@ -285,8 +286,6 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    Debug.Assert(_currentOperation == null);
-
                     // Clear out current operation; it's been canceled
                     _currentOperation = null;
 
@@ -661,7 +660,7 @@ namespace System.Net.Sockets
                 }
 
                 // We've been signalled to try to process the operation.
-                _operation.OperationQueue.GetQueuedOperationStatus();
+                _operation.OperationQueue.StartOperation();
 
                 return (true, default);
             }
@@ -764,7 +763,7 @@ namespace System.Net.Sockets
                     }
 
                     // We've been signalled to try to process the operation.
-                    state._operation.OperationQueue.GetQueuedOperationStatus();
+                    state._operation.OperationQueue.StartOperation();
 
                     Print($"--- WaitForAsyncRetry: return true after WaitForAsyncSignal");
 
