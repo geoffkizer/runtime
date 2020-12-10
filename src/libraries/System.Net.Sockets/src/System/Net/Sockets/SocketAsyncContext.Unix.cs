@@ -525,6 +525,9 @@ namespace System.Net.Sockets
                 return (true, state);
             }
 
+            // TODO: Rework straight sync path; not sure how.
+            // But we can test for nonBlockingSet, and change our behavior based on that.
+
             // False means cancellation (or timeout); error is in [socketError]
             public (bool retry, SocketError socketError) WaitForDataAvailable()
             {
@@ -538,13 +541,33 @@ namespace System.Net.Sockets
                         return (false, SocketError.TimedOut);
                     }
 
+                    // NB: _isStarted means we have acquired the semaphore.
                     _isStarted = true;
+
+                    if (!_operation.AssociatedContext._nonBlockingSet)
+                    {
+                        // This is a fully sync and blocking operation, at least for now.
+                        // Just let it proceed. But also, see below.
+                        return (true, default);
+                    }
+
                     if (_operation.OperationQueue.IsReady(_operation.AssociatedContext))
                     {
                         return (true, default);
                     }
                 }
 
+                if (!_operation.AssociatedContext._nonBlockingSet)
+                {
+                    // We already attempted the operation once above.
+                    // So, any attempt to retry it (after EWOULDBLOCK) means we must have timed out the original attempt.
+                    // On the other hand, if we transitioned from blocking to non-blocking in the interim, then we want to retry the operation.
+                    Cleanup();
+                    return (false, SocketError.TimedOut);
+                }
+    
+                // This needs to get deferred until after the initial attempt, because we don't want to actually register for epoll
+                // if we are in sync mode, i.e. not non-blocking. The call to ShouldRetrySyncOperation above should guarantee that.
                 // TODO: This could go somewhere else
                 if (!_operation.AssociatedContext.IsRegistered)
                 {
@@ -579,10 +602,6 @@ namespace System.Net.Sockets
 
             // TODO: This shares a lot of logic with the above sync routine, but
             // I'll wait to simplify/unify it until I have a better sense of how the queue simplfication shakes out.
-
-            // TODO: This is calling StartSyncOperation below, does that matter? Not sure what the difference is here...
-            // I don't think this matters, as it's really just a modified version of StartAsyncOperation. COnsider.
-
 
             // TODO: Add a CancellationToken argument
 
