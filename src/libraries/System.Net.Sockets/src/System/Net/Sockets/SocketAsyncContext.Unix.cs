@@ -215,6 +215,7 @@ namespace System.Net.Sockets
                 // This path is hacked out for now
                 Debug.Assert(!processAsyncEvents);
 
+                AsyncOperation? toSignal = null;
                 using (Lock())
                 {
                     Trace(context, $"Enter");
@@ -222,10 +223,12 @@ namespace System.Net.Sockets
                     _dataAvailable = true;
                     if (_currentOperation is not null)
                     {
-                        _currentOperation.Signal();
+                        toSignal = _currentOperation;
                         _currentOperation = null;
                     }
                 }
+
+                toSignal?.Signal();
             }
 
             // This is called when we are about to try the operation, after a notification has been received.
