@@ -207,27 +207,9 @@ namespace System.Net.Sockets
             // NOTE: Using this for async ops now too....
 
 
-
-
-#if false
-            // TODO:
-            // Push the context regsitration into caller,
-            // and get rid of this routine -- call PendQueuedOperation instead.
-            // Returns true if retry needed, false if not.
-            public bool StartSyncOperation(SocketAsyncContext context, TOperation operation)
-            {
-                // TODO: This could probably be popped up a level, or handled differently...
-                if (!context.IsRegistered)
-                {
-                    context.Register();
-                }
-
-                return PendQueuedOperation(operation);
-            }
-#endif
-
             // Note, I changed the default of processAsyncEvents to false.
             // I believe this is more correct, but it's still a change in behavior...
+            // TODO: Note this isn't even using any of the arguments
             public void ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
             {
                 // This path is hacked out for now
@@ -246,7 +228,6 @@ namespace System.Net.Sockets
                 }
             }
 
-            // Returns true if cancelled or queue stopped, false if op should be tried
             public void GetQueuedOperationStatus()
             {
                 using (Lock())
@@ -258,9 +239,11 @@ namespace System.Net.Sockets
                 }
             }
 
-            // We tried the op and it didn't complete.
-            // Return true if retry needed, false if not
-            public bool PendQueuedOperation(TOperation op)
+            // Return true if pending needed, false if not
+            // If [true] is returned, [op] will not be signalled
+            // If [false] is returned, [op] will be signalled on a callback-capable thread
+            // TODO: Should this take Action, or Action<object> + state?
+            public bool WaitForDataAvailable(TOperation op)
             {
                 // Check for retry and reset queue state.
 
@@ -635,7 +618,7 @@ namespace System.Net.Sockets
                         _operation.AssociatedContext.Register();
                     }
 
-                    retry = _operation.OperationQueue.PendQueuedOperation(_operation);
+                    retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
                     if (retry)
                     {
                         return (true, default);
@@ -646,7 +629,7 @@ namespace System.Net.Sockets
                 else
                 {
                     // We just tried to execute the queued operation, but it failed.
-                    retry = _operation.OperationQueue.PendQueuedOperation(_operation);
+                    retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
                     if (retry)
                     {
                         return (true, default);
@@ -692,6 +675,7 @@ namespace System.Net.Sockets
 
                 try
                 {
+                    // CONSIDER: Move semaphore handling to caller
                     if (!state._isStarted)
                     {
                         if (!await state.WaitForSemaphoreAsync().ConfigureAwait(false))
@@ -728,7 +712,7 @@ namespace System.Net.Sockets
                             state._operation.AssociatedContext.Register();
                         }
 
-                        retry = state._operation.OperationQueue.PendQueuedOperation(state._operation);
+                        retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
@@ -741,7 +725,7 @@ namespace System.Net.Sockets
                     else
                     {
                         // We just tried to execute the queued operation, but it failed.
-                        retry = state._operation.OperationQueue.PendQueuedOperation(state._operation);
+                        retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned retry, return true");
