@@ -140,25 +140,12 @@ namespace System.Net.Sockets
         private struct OperationQueue
         {
             // The ultimate goal here is to get rid of QueueState and the lock and sequence number.
+            // So far, I got rid of the QueueState and the sequence number,
+            // TODO: get rid of the lock, replace with interlocked ops
 
             // This is new stuff:
             public SemaphoreSlim _semaphore;
             // TODO: This is not getting disposed currently.
-
-            // Quick overview:
-            //
-            // When attempting to perform an IO operation, the caller first checks IsReady,
-            // and if true, attempts to perform the operation itself.
-            // If this returns EWOULDBLOCK, or if the queue was not ready, then the operation
-            // is enqueued by calling StartAsyncOperation and the state becomes Waiting.
-            // When an epoll notification is received, we check if the state is Waiting,
-            // and if so, change the state to Processing and enqueue a workitem to the threadpool
-            // to try to perform the enqueued operations.
-            // If an operation is successfully performed, we remove it from the queue,
-            // enqueue another threadpool workitem to process the next item in the queue (if any),
-            // and call the user's completion callback.
-            // If we successfully process all enqueued operations, then the state becomes Ready;
-            // otherwise, the state becomes Waiting and we wait for another epoll notification.
 
             // This replaces the old sequence number.
             private bool _dataAvailable;
@@ -220,6 +207,7 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
+                    Debug.Assert(_dataAvailable == false);
                     Debug.Assert(_currentOperation == null);
 
                     _dataAvailable = true;
