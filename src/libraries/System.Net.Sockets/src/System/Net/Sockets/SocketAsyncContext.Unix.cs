@@ -1,14 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 
 // Disable warning about accesing ValueTask directly
 #pragma warning disable CA2012
@@ -454,10 +453,10 @@ namespace System.Net.Sockets
         }
 
         private static ValueTask<(bool, SocketError, SyncOperationState2<ReadOperation>)> WaitForReadAsyncRetry(SyncOperationState2<ReadOperation> state) =>
-            SyncOperationState2<ReadOperation>.WaitForAsyncRetry(state);
+            SyncOperationState2<ReadOperation>.WaitForDataAvailableAsync(state);
 
         private static ValueTask<(bool, SocketError, SyncOperationState2<WriteOperation>)> WaitForWriteAsyncRetry(SyncOperationState2<WriteOperation> state) =>
-            SyncOperationState2<WriteOperation>.WaitForAsyncRetry(state);
+            SyncOperationState2<WriteOperation>.WaitForDataAvailableAsync(state);
 
         //private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("SOCKETTRACE") == "1";
         private const bool TraceEnabled = true;
@@ -598,7 +597,7 @@ namespace System.Net.Sockets
             }
 
             // False means cancellation (or timeout); error is in [socketError]
-            public (bool retry, SocketError socketError) WaitForSyncRetry()
+            public (bool retry, SocketError socketError) WaitForDataAvailable()
             {
                 bool retry;
 
@@ -677,7 +676,7 @@ namespace System.Net.Sockets
 
             // NOTE: This needs to be static because this is a struct.
 
-            public static async ValueTask<(bool retry, SocketError socketError, SyncOperationState2<T> state)> WaitForAsyncRetry(SyncOperationState2<T> state)
+            public static async ValueTask<(bool retry, SocketError socketError, SyncOperationState2<T> state)> WaitForDataAvailableAsync(SyncOperationState2<T> state)
             {
                 bool retry;
 
@@ -810,7 +809,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     acceptedFd = default;
@@ -900,7 +899,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     return errorCode;
@@ -1006,7 +1005,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     bytesReceived = default;
@@ -1160,7 +1159,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     bytesReceived = default;
@@ -1254,7 +1253,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     bytesReceived = default;
@@ -1362,7 +1361,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     return errorCode;
@@ -1452,7 +1451,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     return errorCode;
@@ -1541,7 +1540,7 @@ namespace System.Net.Sockets
             while (true)
             {
                 bool retry;
-                (retry, errorCode) = state.WaitForSyncRetry();
+                (retry, errorCode) = state.WaitForDataAvailable();
                 if (!retry)
                 {
                     return errorCode;
