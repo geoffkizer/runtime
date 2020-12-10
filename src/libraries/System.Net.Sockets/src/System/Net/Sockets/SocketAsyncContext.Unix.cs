@@ -182,22 +182,6 @@ namespace System.Net.Sockets
                 _semaphore = new SemaphoreSlim(1, 1);
             }
 
-            // IsReady returns whether an operation can be executed immediately.
-            // To be clear, this always returns true, but it also resets _dataAvailable so we can check it later on.
-            public bool IsReady(SocketAsyncContext context)
-            {
-                // We don't care if it's stopped.
-                using (Lock())
-                {
-                    // Note, we really should check for readiness anyway; it's not really anymore expensive is it?
-
-                    // We always return true from this.
-                    // The semaphore will enforce serialization of operations.
-                    _dataAvailable = false;
-                    return true;
-                }
-            }
-
             public void OnReady()
             {
                 AsyncOperation? toSignal = null;
