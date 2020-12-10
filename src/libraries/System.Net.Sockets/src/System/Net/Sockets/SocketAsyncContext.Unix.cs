@@ -252,11 +252,6 @@ namespace System.Net.Sockets
                 {
                     Debug.Assert(_currentOperation == null);
 
-                    if (_stopped)
-                    {
-                        return true;
-                    }
-
                     // Reset _dataAvailable for subsequent attempts
                     _dataAvailable = false;
                     return false;
@@ -271,12 +266,6 @@ namespace System.Net.Sockets
 
                 using (Lock())
                 {
-                    if (_stopped)
-                    {
-                        Debug.Assert(_currentOperation == null);
-                        return (true, false);
-                    }
-
                     Debug.Assert(_currentOperation == null);
 
                     if (_dataAvailable)
@@ -300,18 +289,11 @@ namespace System.Net.Sockets
                 // Note it must be there since it can only be processed and removed by the caller.
                 using (Lock())
                 {
-                    if (_stopped)
-                    {
-                        Debug.Assert(_currentOperation == null);
-                    }
-                    else
-                    {
-                        // Clear out current operation; it's been canceled
-                        _currentOperation = null;
+                    // Clear out current operation; it's been canceled
+                    _currentOperation = null;
 
-                        // Just assume there is data available.
-                        _dataAvailable = true;
-                    }
+                    // Just assume there is data available.
+                    _dataAvailable = true;
                 }
             }
 
