@@ -199,27 +199,11 @@ namespace System.Net.Sockets
                 }
             }
 
-            // TODO: This is a modified version of above for sync operations.
-            // It doesn't actually invoke the operation....
-            // Returns aborted: true if the op was aborted due to queue being stopped
-            // Returns retry: true if we need to retry due to updated seq number
-            // Returns retry: false if we enqueued and will be signalled later.
-            // NOTE: Using this for async ops now too....
-
-
-            // Note, I changed the default of processAsyncEvents to false.
-            // I believe this is more correct, but it's still a change in behavior...
-            // TODO: Note this isn't even using any of the arguments
-            public void ProcessSyncEventOrGetAsyncEvent(SocketAsyncContext context, bool skipAsyncEvents = false, bool processAsyncEvents = false)
+            public void OnReady()
             {
-                // This path is hacked out for now
-                Debug.Assert(!processAsyncEvents);
-
                 AsyncOperation? toSignal = null;
                 using (Lock())
                 {
-                    Trace(context, $"Enter");
-
                     _dataAvailable = true;
                     if (_currentOperation is not null)
                     {
@@ -1652,12 +1636,12 @@ namespace System.Net.Sockets
 
             if ((events & Interop.Sys.SocketEvents.Read) != 0)
             {
-                _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this);
+                _receiveQueue.OnReady();
             }
 
             if ((events & Interop.Sys.SocketEvents.Write) != 0)
             {
-                _sendQueue.ProcessSyncEventOrGetAsyncEvent(this);
+                _sendQueue.OnReady();
             }
         }
 
