@@ -556,17 +556,19 @@ namespace System.Net.Sockets
                         return (true, default);
                     }
                 }
-
-                if (!_operation.AssociatedContext._nonBlockingSet)
+                else
                 {
-                    // We already attempted the operation once above.
-                    // So, if we got are retrying it, we must have got EWOULDBLOCK, which means we timed out the original attempt.
-                    // On the other hand, if we transitioned from blocking to non-blocking in the interim, then we want to retry the operation.
-                    Cleanup();
-                    return (false, SocketError.TimedOut);
+                    if (!_operation.AssociatedContext._nonBlockingSet)
+                    {
+                        // We already attempted the operation once above.
+                        // So, if we got are retrying it, we must have got EWOULDBLOCK, which means we timed out the original attempt.
+                        // On the other hand, if we transitioned from blocking to non-blocking in the interim, then we want to retry the operation.
+                        Cleanup();
+                        return (false, SocketError.TimedOut);
+                    }
                 }
 
-                // This needs to get deferred until after the initial attempt, because we don't want to actually register for epoll
+                // This needs to get deferred until we know we are in non-blocking mode because we don't want to actually register for epoll
                 // if we are in sync mode, i.e. not non-blocking. The logic above should guarantee that.
                 // TODO: This could go somewhere else
                 if (!_operation.AssociatedContext.IsRegistered)
