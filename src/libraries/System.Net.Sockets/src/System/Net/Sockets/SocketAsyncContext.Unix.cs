@@ -179,7 +179,6 @@ namespace System.Net.Sockets
                 Debug.Assert(_queueLock == null);
                 _queueLock = new object();
 
-                _stopped = false;
                 _dataAvailable = true;
 
                 _semaphore = new SemaphoreSlim(1, 1);
