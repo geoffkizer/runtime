@@ -75,7 +75,7 @@ namespace System.Net.Sockets
         {
             public AsyncOperation2(SocketAsyncContext context) : base(context) { }
 
-            public abstract ref OperationQueue<T> OperationQueue { get; }
+            public abstract ref OperationQueue OperationQueue { get; }
         }
 
         // These two abstract classes differentiate the operations that go in the
@@ -84,14 +84,14 @@ namespace System.Net.Sockets
         {
             public ReadOperation(SocketAsyncContext context) : base(context) { }
 
-            public sealed override ref OperationQueue<ReadOperation> OperationQueue => ref AssociatedContext._receiveQueue;
+            public sealed override ref OperationQueue OperationQueue => ref AssociatedContext._receiveQueue;
         }
 
         private abstract class WriteOperation : AsyncOperation2<WriteOperation>
         {
             public WriteOperation(SocketAsyncContext context) : base(context) { }
 
-            public sealed override ref OperationQueue<WriteOperation> OperationQueue => ref AssociatedContext._sendQueue;
+            public sealed override ref OperationQueue OperationQueue => ref AssociatedContext._sendQueue;
         }
 
 
@@ -137,8 +137,7 @@ namespace System.Net.Sockets
             }
         }
 
-        private struct OperationQueue<TOperation>
-            where TOperation : AsyncOperation
+        private struct OperationQueue
         {
             // The ultimate goal here is to get rid of QueueState and the lock and sequence number.
 
@@ -247,7 +246,7 @@ namespace System.Net.Sockets
             // If [true] is returned, [op] will not be signalled
             // If [false] is returned, [op] will be signalled on a callback-capable thread
             // TODO: Should this take Action, or Action<object> + state?
-            public bool WaitForDataAvailable(TOperation op)
+            public bool WaitForDataAvailable(AsyncOperation op)
             {
                 using (Lock())
                 {
@@ -290,8 +289,6 @@ namespace System.Net.Sockets
                 AsyncOperation? toSignal = null;
                 using (Lock())
                 {
-                    Trace(context, $"Enter");
-
                     // TODO: This should just call Signal or whatever
                     if (_currentOperation != null)
                     {
@@ -302,30 +299,17 @@ namespace System.Net.Sockets
 
                         aborted = true;
                     }
-
-                    Trace(context, $"Exit");
                 }
 
                 toSignal?.Signal();
 
                 return aborted;
             }
-
-            [Conditional("SOCKETASYNCCONTEXT_TRACE")]
-            public void Trace(SocketAsyncContext context, string message, [CallerMemberName] string? memberName = null)
-            {
-                string queueType =
-                    typeof(TOperation) == typeof(ReadOperation) ? "recv" :
-                    typeof(TOperation) == typeof(WriteOperation) ? "send" :
-                    "???";
-
-                OutputTrace($"{IdOf(context)}-{queueType}.{memberName}: {message}, {_dataAvailable}, {((_currentOperation == null) ? "empty" : "not empty")}");
-            }
         }
 
         private readonly SafeSocketHandle _socket;
-        private OperationQueue<ReadOperation> _receiveQueue;
-        private OperationQueue<WriteOperation> _sendQueue;
+        private OperationQueue _receiveQueue;
+        private OperationQueue _sendQueue;
         private SocketAsyncEngine? _asyncEngine;
         private bool IsRegistered => _asyncEngine != null;
         private bool _nonBlockingSet;
