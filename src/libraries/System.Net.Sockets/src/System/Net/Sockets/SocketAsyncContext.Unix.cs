@@ -150,7 +150,12 @@ namespace System.Net.Sockets
             // This replaces the old sequence number.
             private bool _dataAvailable;
 
-            private AsyncOperation? _currentOperation;
+            // TODO: This is causing unnecessary allocation in callers; consider how to make this more efficient.
+            // The trickiness here is that I'm using this delegate reference for interlocked operations.
+            // So it's not trivial to just add a "state" param and store this with appropriate coordination across threads.
+            // Instead, I may want to change this to something like a small, mutable object that stores the state...
+            // I could even specialize this for the particular cases we care about, i.e. MRE for sync, TCS for async.
+            private Action? _waiterCallback;
 
             // The _queueLock is used to ensure atomic access to the queue state above.
             // The lock is only ever held briefly, to read and/or update queue state, and
@@ -165,24 +170,28 @@ namespace System.Net.Sockets
                 _queueLock = new object();
 
                 _dataAvailable = true;
+                _waiterCallback = null;
 
                 _semaphore = new SemaphoreSlim(1, 1);
             }
 
             public void OnReady()
             {
-                AsyncOperation? toSignal = null;
+                Action? waiterCallback = null;
                 using (Lock())
                 {
                     _dataAvailable = true;
-                    if (_currentOperation is not null)
+                    if (_waiterCallback is not null)
                     {
-                        toSignal = _currentOperation;
-                        _currentOperation = null;
+                        waiterCallback = _waiterCallback;
+                        _waiterCallback = null;
                     }
                 }
 
-                toSignal?.Signal();
+                if (waiterCallback is not null)
+                {
+                    waiterCallback();
+                }
             }
 
             // This is called when we are about to try the operation, after a notification has been received.
@@ -191,7 +200,7 @@ namespace System.Net.Sockets
                 using (Lock())
                 {
                     Debug.Assert(_dataAvailable == true);
-                    Debug.Assert(_currentOperation == null);
+                    Debug.Assert(_waiterCallback == null);
 
                     // Reset _dataAvailable for subsequent attempts
                     _dataAvailable = false;
@@ -207,21 +216,22 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
-                    Debug.Assert(_currentOperation == null);
+                    Debug.Assert(_waiterCallback == null);
 
                     _dataAvailable = true;
                 }
             }
 
+            // TODO: COnsider combining this with the wait sync/async logic in caller.
             // Return true if pending needed, false if not
             // If [true] is returned, [op] will not be signalled
             // If [false] is returned, [op] will be signalled on a callback-capable thread
             // TODO: Should this take Action, or Action<object> + state?
-            public bool WaitForDataAvailable(AsyncOperation op)
+            public bool WaitForDataAvailable(Action waiterCallback)
             {
                 using (Lock())
                 {
-                    Debug.Assert(_currentOperation == null);
+                    Debug.Assert(_waiterCallback == null);
 
                     if (_dataAvailable)
                     {
@@ -230,7 +240,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        _currentOperation = op;
+                        _waiterCallback = waiterCallback;
                         return false;
                     }
                 }
@@ -242,7 +252,7 @@ namespace System.Net.Sockets
             {
                 using (Lock())
                 {
-                    if (_currentOperation is null)
+                    if (_waiterCallback is null)
                     {
                         // The epoll thread won the race and notified the waiter already.
                         Debug.Assert(_dataAvailable);
@@ -251,7 +261,7 @@ namespace System.Net.Sockets
                     {
                         // We won the race. Clear out the waiter so the epoll thread won't notify it.
                         Debug.Assert(!_dataAvailable);
-                        _currentOperation = null;
+                        _waiterCallback = null;
                     }
                 }
             }
@@ -261,14 +271,14 @@ namespace System.Net.Sockets
             {
                 bool aborted = false;
 
-                AsyncOperation? toSignal = null;
+                Action? waiterCallback = null;
                 using (Lock())
                 {
                     // TODO: This should just call Signal or whatever
-                    if (_currentOperation != null)
+                    if (_waiterCallback != null)
                     {
-                        toSignal = _currentOperation;
-                        _currentOperation = null;
+                        waiterCallback = _waiterCallback;
+                        _waiterCallback = null;
 
                         _dataAvailable = true;
 
@@ -276,7 +286,10 @@ namespace System.Net.Sockets
                     }
                 }
 
-                toSignal?.Signal();
+                if (waiterCallback is not null)
+                {
+                    waiterCallback();
+                }
 
                 return aborted;
             }
@@ -429,6 +442,7 @@ namespace System.Net.Sockets
             private DateTime? _expiration;
             private CancellationToken _cancellationToken;
             private T _operation;
+            private Action _waiterCallback;
 
             public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
             {
@@ -441,6 +455,9 @@ namespace System.Net.Sockets
                 _isStarted = false;
 
                 _operation = operation;
+
+                // This is allocating -- try to improve this
+                _waiterCallback = () => { operation.Signal(); };
             }
 
             private int CurrentTimeout =>
@@ -550,7 +567,7 @@ namespace System.Net.Sockets
                 // TODO: This is suboptimal, obviously...
                 _operation.Event = new ManualResetEventSlim(false, 0);
 
-                retry = _operation.OperationQueue.WaitForDataAvailable(_operation);
+                retry = _operation.OperationQueue.WaitForDataAvailable(_waiterCallback);
                 if (retry)
                 {
                     return (true, default);
@@ -609,7 +626,7 @@ namespace System.Net.Sockets
                     // TODO: We don't always wait on this (i.e. retry) -- need to be better about how we allocate this.
                     state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                    retry = state._operation.OperationQueue.WaitForDataAvailable(state._operation);
+                    retry = state._operation.OperationQueue.WaitForDataAvailable(state._waiterCallback);
                     if (retry)
                     {
                         return (true, default, state);
