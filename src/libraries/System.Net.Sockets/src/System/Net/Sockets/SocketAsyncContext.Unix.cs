@@ -213,7 +213,8 @@ namespace System.Net.Sockets
             // TODO:
             // Push the context regsitration into caller,
             // and get rid of this routine -- call PendQueuedOperation instead.
-            public (bool aborted, bool retry) StartSyncOperation(SocketAsyncContext context, TOperation operation)
+            // Returns true if retry needed, false if not.
+            public bool StartSyncOperation(SocketAsyncContext context, TOperation operation)
             {
                 // TODO: This could probably be popped up a level, or handled differently...
                 if (!context.IsRegistered)
@@ -258,8 +259,8 @@ namespace System.Net.Sockets
             }
 
             // We tried the op and it didn't complete.
-            // Set it to pend again, unless we need to retry again
-            public (bool cancelled, bool retry) PendQueuedOperation(TOperation op)
+            // Return true if retry needed, false if not
+            public bool PendQueuedOperation(TOperation op)
             {
                 // Check for retry and reset queue state.
 
@@ -270,12 +271,12 @@ namespace System.Net.Sockets
                     if (_dataAvailable)
                     {
                         _dataAvailable = false;
-                        return (false, true);
+                        return true;
                     }
                     else
                     {
                         _currentOperation = op;
-                        return (false, false);
+                        return false;
                     }
                 }
             }
@@ -631,13 +632,7 @@ namespace System.Net.Sockets
                     // Allocate the event we will wait on
                     _operation.Event = new ManualResetEventSlim(false, 0);
 
-                    (cancelled, retry) = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation);
-                    if (cancelled)
-                    {
-                        Cleanup();
-                        return (false, SocketError.OperationAborted);
-                    }
-
+                    retry = _operation.OperationQueue.StartSyncOperation(_operation.AssociatedContext, _operation);
                     if (retry)
                     {
                         return (true, default);
@@ -648,13 +643,7 @@ namespace System.Net.Sockets
                 else
                 {
                     // We just tried to execute the queued operation, but it failed.
-                    (cancelled, retry) = _operation.OperationQueue.PendQueuedOperation(_operation);
-                    if (cancelled)
-                    {
-                        Cleanup();
-                        return (false, SocketError.OperationAborted);
-                    }
-
+                    retry = _operation.OperationQueue.PendQueuedOperation(_operation);
                     if (retry)
                     {
                         return (true, default);
@@ -736,15 +725,7 @@ namespace System.Net.Sockets
                         // Allocate the TCS we will wait on
                         state._operation.CompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-                        (cancelled, retry) = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation);
-                        if (cancelled)
-                        {
-                            Print($"--- WaitForAsyncRetry: StartSyncOperation returned cancelled, return false");
-
-                            state.Cleanup();
-                            return (false, SocketError.OperationAborted, state);
-                        }
-
+                        retry = state._operation.OperationQueue.StartSyncOperation(state._operation.AssociatedContext, state._operation);
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: StartSyncOperation returned retry, return true");
@@ -757,15 +738,7 @@ namespace System.Net.Sockets
                     else
                     {
                         // We just tried to execute the queued operation, but it failed.
-                        (cancelled, retry) = state._operation.OperationQueue.PendQueuedOperation(state._operation);
-                        if (cancelled)
-                        {
-                            Print($"--- WaitForAsyncRetry: PendQueuedOperation returned cancelled, return false");
-
-                            state.Cleanup();
-                            return (false, SocketError.OperationAborted, state);
-                        }
-
+                        retry = state._operation.OperationQueue.PendQueuedOperation(state._operation);
                         if (retry)
                         {
                             Print($"--- WaitForAsyncRetry: PendQueuedOperation returned retry, return true");
