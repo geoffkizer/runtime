@@ -162,8 +162,6 @@ namespace System.Net.Sockets
             // If we successfully process all enqueued operations, then the state becomes Ready;
             // otherwise, the state becomes Waiting and we wait for another epoll notification.
 
-            private bool _stopped;          // Replaces QueueState.Stopped
-
             // This replaces the old sequence number.
             private bool _dataAvailable;
 
@@ -194,6 +192,8 @@ namespace System.Net.Sockets
                 // We don't care if it's stopped.
                 using (Lock())
                 {
+                    // Note, we really should check for readiness anyway; it's not really anymore expensive is it?
+
                     // We always return true from this.
                     // The semaphore will enforce serialization of operations.
                     _dataAvailable = false;
@@ -302,19 +302,11 @@ namespace System.Net.Sockets
             {
                 bool aborted = false;
 
-                // We should be called exactly once, by SafeSocketHandle.
-                Debug.Assert(!_stopped);
-
                 using (Lock())
                 {
                     Trace(context, $"Enter");
 
-                    Debug.Assert(!_stopped);
-
-                    // What if we just don't set _stopped?
-
-                    //_stopped = true;
-
+                    // TODO: This should just call Signal or whatever
                     if (_currentOperation != null)
                     {
                         AsyncOperation op = _currentOperation;
