@@ -461,7 +461,11 @@ namespace System.Net.Sockets
 
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
+                Print($"SyncOperationState2 constr: DateTime.UtcNow = {DateTime.UtcNow}");
+
                 _expiration = timeout == -1 ? null : DateTime.UtcNow.AddMilliseconds(timeout);
+
+                Print($"SyncOperationState2 constr: _expiration = {_expiration}");
 
                 _cancellationToken = cancellationToken;
 
