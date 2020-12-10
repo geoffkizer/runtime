@@ -476,8 +476,6 @@ namespace System.Net.Sockets
 
             private bool WaitForSemaphoreSync()
             {
-                Print($"WaitForSemaphoreSync: CurrentTimeout = {CurrentTimeout}");
-
                 return _operation.OperationQueue._semaphore.Wait(CurrentTimeout);
             }
 
