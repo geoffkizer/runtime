@@ -441,7 +441,7 @@ namespace System.Net.Sockets
         {
             if (TraceEnabled)
             {
-//                printf("%s\r\n", s);
+                printf("%s\r\n", s);
             }
         }
 
@@ -457,6 +457,9 @@ namespace System.Net.Sockets
 
             public SyncOperationState2(T operation, int timeout = -1, CancellationToken cancellationToken = default)
             {
+
+                Print($"SyncOperationState2 constr: timeout = {timeout}");
+
                 Debug.Assert(timeout == -1 || timeout > 0, $"Unexpected timeout: {timeout}");
 
                 _expiration = timeout == -1 ? null : DateTime.UtcNow.AddMilliseconds(timeout);
@@ -476,6 +479,8 @@ namespace System.Net.Sockets
 
             private bool WaitForSemaphoreSync()
             {
+                Print($"WaitForSemaphoreSync: CurrentTimeout = {CurrentTimeout}");
+
                 return _operation.OperationQueue._semaphore.Wait(CurrentTimeout);
             }
 
