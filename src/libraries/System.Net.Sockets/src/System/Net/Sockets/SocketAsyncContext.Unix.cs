@@ -470,7 +470,7 @@ namespace System.Net.Sockets
 
             private int CurrentTimeout =>
                 (_expiration is null) ? -1 :
-                Math.Max((int)(_expiration.Value - DateTime.UtcNow).Ticks, 0);
+                Math.Max((int)(_expiration.Value - DateTime.UtcNow).TotalMilliseconds, 0);
 
             // TODO: Consider separating the timeout adjustment into a helper, and use it for waiting on data signal too.
 
