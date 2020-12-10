@@ -329,7 +329,9 @@ namespace System.Net.Sockets
 
                     Debug.Assert(!_stopped);
 
-                    _stopped = true;
+                    // What if we just don't set _stopped?
+
+                    //_stopped = true;
 
                     if (_currentOperation != null)
                     {
