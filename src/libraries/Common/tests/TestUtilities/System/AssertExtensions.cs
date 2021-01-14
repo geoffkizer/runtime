@@ -431,7 +431,25 @@ namespace System
                 countInfo.Remain--;
             }
         }
-		
+
+        private static bool ManualSequenceEqual<T>(ReadOnlySpan<T> expected, ReadOnlySpan<T> actual) where T : IEquatable<T>
+        {
+            if (expected.Length != actual.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (!expected[i].Equals(actual[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Validates that the actual span is equal to the expected span.
         /// If this fails, determine where the differences are and create an exception with that information.
@@ -442,7 +460,8 @@ namespace System
         {
             // Use the SequenceEqual to compare the arrays for better performance. The default Assert.Equal method compares
             // the arrays by boxing each element that is very slow for large arrays.
-            if (!expected.SequenceEqual(actual))
+            //if (!expected.SequenceEqual(actual))
+            if (!ManualSequenceEqual(expected, actual))
             {
                 if (expected.Length != actual.Length)
                 {
