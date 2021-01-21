@@ -94,7 +94,15 @@ namespace System.Net.Http.Functional.Tests
                 using (HttpClient client = CreateHttpClient(handler))
                 {
                     handler.AutomaticDecompression = methods;
-                    Assert.Equal<byte>(expectedContent, await client.GetByteArrayAsync(uri));
+
+                    HttpResponseMessage response = await client.GetAsync(uri);
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                    // Decompression should cause these headers to be removed, since they only apply to the compressed content
+                    Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
+                    Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
+
+                    Assert.Equal<byte>(expectedContent, await response.Content.ReadAsByteArrayAsync());
                 }
             }, async server =>
             {
