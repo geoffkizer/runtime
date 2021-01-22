@@ -39,6 +39,10 @@ namespace System.Net.Http.Functional.Tests
             }
         }
 
+        // Here's what I want in general.
+        // I want to use the enum value in the InlineData.
+        // I want helpers that will map this to a name and do compression on a byte[] -> byte[]. (Decompression too? Don't think I need it.)
+
         [Theory]
         [InlineData("gzip", false)]
         [InlineData("gzip", true)]
@@ -194,7 +198,11 @@ namespace System.Net.Http.Functional.Tests
                 using (HttpResponseMessage response = await client.SendAsync(TestAsync, CreateRequest(HttpMethod.Get, uri, remoteServer.HttpVersion)))
                 {
                     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                    Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
+                    Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
                     string responseContent = await response.Content.ReadAsStringAsync();
+
                     _output.WriteLine(responseContent);
                     TestHelper.VerifyResponseBody(
                         responseContent,
@@ -224,30 +232,14 @@ namespace System.Net.Http.Functional.Tests
             HttpClientHandler handler = CreateHttpClientHandler();
             handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             using (HttpClient client = CreateHttpClient(handler))
-            {
-                Assert.Contains(expectedContent, await client.GetStringAsync(uri));
-            }
-        }
-
-        [OuterLoop("Uses external server")]
-        [Theory, MemberData(nameof(RemoteServersAndCompressionUris))]
-        public async Task GetAsync_SetAutomaticDecompression_HeadersRemoved(Configuration.Http.RemoteServer remoteServer, Uri uri)
-        {
-            // Sync API supported only up to HTTP/1.1
-            if (!TestAsync && remoteServer.HttpVersion.Major >= 2)
-            {
-                return;
-            }
-
-            HttpClientHandler handler = CreateHttpClientHandler();
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-            using (HttpClient client = CreateHttpClientForRemoteServer(remoteServer, handler))
-            using (HttpResponseMessage response = await client.SendAsync(TestAsync, CreateRequest(HttpMethod.Get, uri, remoteServer.HttpVersion), HttpCompletionOption.ResponseHeadersRead))
+            using (HttpResponseMessage response = await client.GetAsync(uri))
             {
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
                 Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
                 Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
+
+                Assert.Contains(expectedContent, await response.Content.ReadAsStringAsync());
             }
         }
 
