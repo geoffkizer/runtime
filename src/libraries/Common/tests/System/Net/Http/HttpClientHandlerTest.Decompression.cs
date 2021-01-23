@@ -195,7 +195,7 @@ namespace System.Net.Http.Functional.Tests
             string manualAcceptEncodingHeaderValue,
             string expectedHeaderValue)
         {
-            await LoopbackServer.CreateClientAndServerAsync(async uri =>
+            await LoopbackServerFactory.CreateClientAndServerAsync(async uri =>
             {
                 using (HttpClientHandler handler = CreateHttpClientHandler())
                 using (HttpClient client = CreateHttpClient(handler))
@@ -214,10 +214,10 @@ namespace System.Net.Http.Functional.Tests
                 }
             }, async server =>
             {
-                List<string> requestLines = await server.AcceptConnectionSendResponseAndCloseAsync();
+                HttpRequestData requestData = await server.AcceptConnectionSendResponseAndCloseAsync();
 
-                string acceptEncodingLine = requestLines.Where(x => x.StartsWith("Accept-Encoding:")).Single();
-                Assert.Equal("Accept-Encoding: " + expectedHeaderValue, acceptEncodingLine);
+                string acceptEncodingValue = requestData.GetSingleHeaderValue("Accept-Encoding");
+                Assert.Equal(expectedHeaderValue, acceptEncodingValue);
             });
         }
     }
