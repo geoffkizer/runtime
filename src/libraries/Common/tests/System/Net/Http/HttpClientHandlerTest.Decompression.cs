@@ -41,6 +41,15 @@ namespace System.Net.Http.Functional.Tests
                 _ => throw new InvalidOperationException($"unexpected DecompressionMethod {method}")
             };
 
+        private static Stream GetCompressionStream(DecompressionMethods method, Stream s) =>
+            method switch
+            {
+                DecompressionMethods.GZip => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true),
+                DecompressionMethods.Brotli => new BrotliStream(s, CompressionLevel.Optimal, leaveOpen: true),
+                DecompressionMethods.Deflate => new ZLibStream(s, CompressionLevel.Optimal, leaveOpen: true),
+                _ => throw new InvalidOperationException($"unexpected DecompressionMethod {method}")
+            };
+
         [Theory]
         [InlineData(DecompressionMethods.GZip, false)]
         [InlineData(DecompressionMethods.GZip, true)]
@@ -114,8 +123,8 @@ namespace System.Net.Http.Functional.Tests
                 await server.AcceptConnectionAsync(async connection =>
                 {
                     await connection.ReadRequestHeaderAsync();
-                    await connection.WriteStringAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\n\r\n");
-                    using (Stream compressedStream = compress(connection.Stream))
+                    await connection.Writer.WriteAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\n\r\n");
+                    using (Stream compressedStream = GetCompressionStream(method, connection.Stream))
                     {
                         await compressedStream.WriteAsync(expectedContent);
                     }
@@ -176,7 +185,7 @@ namespace System.Net.Http.Functional.Tests
                 await server.AcceptConnectionAsync(async connection =>
                 {
                     await connection.ReadRequestHeaderAsync();
-                    await connection.WriteStringAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\n\r\n");
+                    await connection.Writer.WriteAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\n\r\n");
                     await connection.Stream.WriteAsync(compressedContent);
                 });
             });
