@@ -167,31 +167,27 @@ namespace System.Net.Http.Functional.Tests
 
         [Theory]
 #if NETCOREAPP
-        [InlineData(DecompressionMethods.Brotli, "br", "", "br")]
-        [InlineData(DecompressionMethods.Brotli, "br", "br", "br")]
-        [InlineData(DecompressionMethods.Brotli, "br", "gzip", "gzip, br")]
-        [InlineData(DecompressionMethods.Brotli, "br", "gzip, deflate", "gzip, deflate, br")]
+        [InlineData(DecompressionMethods.Brotli, "", "br")]
+        [InlineData(DecompressionMethods.Brotli, "br", "br")]
+        [InlineData(DecompressionMethods.Brotli, "gzip", "gzip, br")]
+        [InlineData(DecompressionMethods.Brotli, "gzip, deflate", "gzip, deflate, br")]
 #endif
-        [InlineData(DecompressionMethods.GZip, "gzip", "", "gzip")]
-        [InlineData(DecompressionMethods.Deflate, "deflate", "", "deflate")]
-        [InlineData(DecompressionMethods.GZip | DecompressionMethods.Deflate, "gzip, deflate", "", "gzip, deflate")]
-        [InlineData(DecompressionMethods.GZip, "gzip", "gzip", "gzip")]
-        [InlineData(DecompressionMethods.Deflate, "deflate", "deflate", "deflate")]
-        [InlineData(DecompressionMethods.GZip, "gzip", "deflate", "deflate, gzip")]
-        [InlineData(DecompressionMethods.GZip, "gzip", "br", "br, gzip")]
-        [InlineData(DecompressionMethods.Deflate, "deflate", "gzip", "gzip, deflate")]
-        [InlineData(DecompressionMethods.Deflate, "deflate", "br", "br, deflate")]
-        [InlineData(DecompressionMethods.GZip | DecompressionMethods.Deflate, "gzip, deflate", "gzip, deflate", "gzip, deflate")]
+        [InlineData(DecompressionMethods.GZip, "", "gzip")]
+        [InlineData(DecompressionMethods.Deflate, "", "deflate")]
+        [InlineData(DecompressionMethods.GZip | DecompressionMethods.Deflate, "", "gzip, deflate")]
+        [InlineData(DecompressionMethods.GZip, "gzip", "gzip")]
+        [InlineData(DecompressionMethods.Deflate, "deflate", "deflate")]
+        [InlineData(DecompressionMethods.GZip, "deflate", "deflate, gzip")]
+        [InlineData(DecompressionMethods.GZip, "br", "br, gzip")]
+        [InlineData(DecompressionMethods.Deflate, "gzip", "gzip, deflate")]
+        [InlineData(DecompressionMethods.Deflate, "br", "br, deflate")]
+        [InlineData(DecompressionMethods.GZip | DecompressionMethods.Deflate, "gzip, deflate", "gzip, deflate")]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task GetAsync_SetAutomaticDecompression_AcceptEncodingHeaderSentWithNoDuplicates(
+        public async Task GetAsync_SetAutomaticDecompressionAndManualAcceptEncodingHeader_AcceptEncodingHeaderSentCorrecltyWithNoDuplicates(
             DecompressionMethods methods,
-            string encodings,
             string manualAcceptEncodingHeaderValues,
             string expectedHeaderValue)
         {
-            // get rid
-            Assert.False(encodings == null);
-
             await LoopbackServer.CreateClientAndServerAsync(async uri =>
             {
                 using (HttpClientHandler handler = CreateHttpClientHandler())
@@ -208,7 +204,6 @@ namespace System.Net.Http.Functional.Tests
                     {
                         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                     }
-
                 }
             }, async server =>
             {
