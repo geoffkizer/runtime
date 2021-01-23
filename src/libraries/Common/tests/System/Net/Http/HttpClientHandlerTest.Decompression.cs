@@ -188,43 +188,37 @@ namespace System.Net.Http.Functional.Tests
             string encodings,
             string manualAcceptEncodingHeaderValues)
         {
-            // Brotli only supported on SocketsHttpHandler.
-            if (IsWinHttpHandler && (encodings.Contains("br") || manualAcceptEncodingHeaderValues.Contains("br")))
+            await LoopbackServer.CreateClientAndServerAsync(async uri =>
             {
-                return;
-            }
-
-            await LoopbackServer.CreateServerAsync(async (server, url) =>
-            {
-                HttpClientHandler handler = CreateHttpClientHandler();
-                handler.AutomaticDecompression = methods;
-
+                using (HttpClientHandler handler = CreateHttpClientHandler())
                 using (HttpClient client = CreateHttpClient(handler))
                 {
+                    handler.AutomaticDecompression = methods;
+                    HttpRequestMessage request = CreateRequest(HttpMethod.Get, uri, UseVersion);
                     if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValues))
                     {
-                        client.DefaultRequestHeaders.Add("Accept-Encoding", manualAcceptEncodingHeaderValues);
+                        request.Headers.Add("Accept-Encoding", manualAcceptEncodingHeaderValues);
                     }
 
-                    Task<HttpResponseMessage> clientTask = client.SendAsync(TestAsync, CreateRequest(HttpMethod.Get, url, UseVersion));
-                    Task<List<string>> serverTask = server.AcceptConnectionSendResponseAndCloseAsync();
-                    await TaskTimeoutExtensions.WhenAllOrAnyFailed(new Task[] { clientTask, serverTask });
-
-                    List<string> requestLines = await serverTask;
-                    string requestLinesString = string.Join("\r\n", requestLines);
-                    _output.WriteLine(requestLinesString);
-
-                    Assert.InRange(Regex.Matches(requestLinesString, "Accept-Encoding").Count, 1, 1);
-                    Assert.InRange(Regex.Matches(requestLinesString, encodings).Count, 1, 1);
-                    if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValues))
-                    {
-                        Assert.InRange(Regex.Matches(requestLinesString, manualAcceptEncodingHeaderValues).Count, 1, 1);
-                    }
-
-                    using (HttpResponseMessage response = await clientTask)
+                    using (HttpResponseMessage response = await client.SendAsync(TestAsync, request))
                     {
                         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                     }
+
+                }
+            }, async server =>
+            {
+                List<string> requestLines = await server.AcceptConnectionSendResponseAndCloseAsync();
+
+                // This is stupid
+                string requestLinesString = string.Join("\r\n", requestLines);
+                _output.WriteLine(requestLinesString);
+
+                Assert.InRange(Regex.Matches(requestLinesString, "Accept-Encoding").Count, 1, 1);
+                Assert.InRange(Regex.Matches(requestLinesString, encodings).Count, 1, 1);
+                if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValues))
+                {
+                    Assert.InRange(Regex.Matches(requestLinesString, manualAcceptEncodingHeaderValues).Count, 1, 1);
                 }
             });
         }
