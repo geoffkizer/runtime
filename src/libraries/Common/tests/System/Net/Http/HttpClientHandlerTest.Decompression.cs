@@ -22,9 +22,9 @@ namespace System.Net.Http.Functional.Tests
     public abstract class HttpClientHandler_Decompression_Test : HttpClientHandlerTestBase
     {
 #if !NETFRAMEWORK
-        private static readonly DecompressionMethods _all = DecompressionMethods.All;
+        private const DecompressionMethods AllMethods = DecompressionMethods.All;
 #else
-        private static readonly DecompressionMethods _all = DecompressionMethods.Deflate | DecompressionMethods.GZip;
+        private const DecompressionMethods AllMethods = DecompressionMethods.Deflate | DecompressionMethods.GZip;
 #endif
         public HttpClientHandler_Decompression_Test(ITestOutputHelper output) : base(output) { }
 
@@ -32,15 +32,24 @@ namespace System.Net.Http.Functional.Tests
         // I want to use the enum value in the InlineData.
         // I want helpers that will map this to a name and do compression on a byte[] -> byte[]. (Decompression too? Don't think I need it.)
 
+        private static string GetEncodingName(DecompressionMethods method) =>
+            method switch
+            {
+                DecompressionMethods.GZip => "gzip",
+                DecompressionMethods.Deflate => "deflate",
+                DecompressionMethods.Brotli => "br",
+                _ => throw new InvalidOperationException($"unexpected DecompressionMethod {method}")
+            };
+
         [Theory]
-        [InlineData("gzip", false)]
-        [InlineData("gzip", true)]
-        [InlineData("deflate", false)]
-        [InlineData("deflate", true)]
-        [InlineData("br", false)]
-        [InlineData("br", true)]
+        [InlineData(DecompressionMethods.GZip, "gzip", false)]
+        [InlineData(DecompressionMethods.GZip, "gzip", true)]
+        [InlineData(DecompressionMethods.Deflate, "deflate", false)]
+        [InlineData(DecompressionMethods.Deflate, "deflate", true)]
+        [InlineData(DecompressionMethods.Brotli, "br", false)]
+        [InlineData(DecompressionMethods.Brotli, "br", true)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task DecompressedResponse_MethodSpecified_DecompressedContentReturned(string encodingName, bool all)
+        public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, string encodingName, bool enableAll)
         {
             Func<Stream, Stream> compress;
             DecompressionMethods methods;
@@ -48,7 +57,6 @@ namespace System.Net.Http.Functional.Tests
             {
                 case "gzip":
                     compress = s => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true);
-                    methods = all ? DecompressionMethods.GZip : _all;
                     break;
 
 #if !NETFRAMEWORK
@@ -60,7 +68,6 @@ namespace System.Net.Http.Functional.Tests
                     }
 
                     compress = s => new BrotliStream(s, CompressionLevel.Optimal, leaveOpen: true);
-                    methods = all ? DecompressionMethods.Brotli : _all;
                     break;
 
                 case "deflate":
@@ -69,14 +76,17 @@ namespace System.Net.Http.Functional.Tests
                     compress = IsWinHttpHandler ?
                         new Func<Stream, Stream>(s => new DeflateStream(s, CompressionLevel.Optimal, leaveOpen: true)) :
                         new Func<Stream, Stream>(s => new ZLibStream(s, CompressionLevel.Optimal, leaveOpen: true));
-                    methods = all ? DecompressionMethods.Deflate : _all;
                     break;
 #endif
 
                 default:
-                    Assert.Contains(encodingName, new[] { "br", "deflate", "gzip" });
+                    //Assert.Contains(encodingName, new[] { "br", "deflate", "gzip" });
                     return;
             }
+
+            methods = enableAll ? AllMethods : method;
+
+            Assert.True(enableAll || method == methods);
 
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
@@ -138,7 +148,7 @@ namespace System.Net.Http.Functional.Tests
         [Theory]
         [MemberData(nameof(DecompressedResponse_MethodNotSpecified_OriginalContentReturned_MemberData))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task DecompressedResponse_MethodNotSpecified_OriginalContentReturned(
+        public async Task CompressedResponse_DecompressionNotEnabled_OriginalContentReturned(
             string encodingName, Func<Stream, Stream> compress, DecompressionMethods methods)
         {
             var expectedContent = new byte[12345];
