@@ -137,9 +137,15 @@ namespace System.Net.Http.Functional.Tests
     }
 #endif
 
-    public sealed class SocketsHttpHandler_HttpClientHandler_Decompression_Tests : HttpClientHandler_Decompression_Test
+    public sealed class SocketsHttpHandler_HttpClientHandler_Decompression_Http11_Test : HttpClientHandler_Decompression_Test
     {
-        public SocketsHttpHandler_HttpClientHandler_Decompression_Tests(ITestOutputHelper output) : base(output) { }
+        public SocketsHttpHandler_HttpClientHandler_Decompression_Http11_Test(ITestOutputHelper output) : base(output) { }
+    }
+
+    public sealed class SocketsHttpHandler_HttpClientHandler_Decompression_Http2_Test : HttpClientHandler_Decompression_Test
+    {
+        public SocketsHttpHandler_HttpClientHandler_Decompression_Http2_Test(ITestOutputHelper output) : base(output) { }
+        protected override Version UseVersion => HttpVersion.Version20;
     }
 
     [ConditionalClass(typeof(PlatformDetection), nameof(PlatformDetection.IsNotBrowser))]
