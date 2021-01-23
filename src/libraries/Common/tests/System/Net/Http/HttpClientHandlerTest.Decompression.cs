@@ -110,20 +110,20 @@ namespace System.Net.Http.Functional.Tests
         {
             yield return new object[]
             {
-                "gzip",
+                DecompressionMethods.GZip,
                 new Func<Stream, Stream>(s => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true)),
                 DecompressionMethods.None
             };
 #if !NETFRAMEWORK
             yield return new object[]
             {
-                "deflate",
+                DecompressionMethods.Deflate,
                 new Func<Stream, Stream>(s => new ZLibStream(s, CompressionLevel.Optimal, leaveOpen: true)),
                 DecompressionMethods.Brotli
             };
             yield return new object[]
             {
-                "br",
+                DecompressionMethods.Brotli,
                 new Func<Stream, Stream>(s => new BrotliStream(s, CompressionLevel.Optimal, leaveOpen: true)),
                 DecompressionMethods.Deflate | DecompressionMethods.GZip
             };
@@ -134,8 +134,10 @@ namespace System.Net.Http.Functional.Tests
         [MemberData(nameof(DecompressedResponse_MethodNotSpecified_OriginalContentReturned_MemberData))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
         public async Task CompressedResponse_DecompressionNotEnabled_OriginalContentReturned(
-            string encodingName, Func<Stream, Stream> compress, DecompressionMethods methods)
+            DecompressionMethods method, Func<Stream, Stream> compress, DecompressionMethods methods)
         {
+            string encodingName = GetEncodingName(method);
+
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
 
