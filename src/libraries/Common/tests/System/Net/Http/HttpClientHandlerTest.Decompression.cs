@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Test.Common;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -145,7 +146,18 @@ namespace System.Net.Http.Functional.Tests
                 using (HttpClient client = CreateHttpClient(handler))
                 {
                     handler.AutomaticDecompression = methods;
-                    Assert.Equal<byte>(compressedContent, await client.GetByteArrayAsync(uri));
+
+                    using (HttpResponseMessage response = await client.GetAsync(uri))
+                    {
+                        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                        // The content should still have these headers since it wasn't decompressed
+                        Assert.Equal(1, response.Content.Headers.ContentEncoding.Count);
+                        Assert.Equal(encodingName, response.Content.Headers.ContentEncoding.First());
+                        Assert.Equal(compressedContent.Length, response.Content.Headers.ContentLength);
+
+                        Assert.Equal<byte>(compressedContent, await response.Content.ReadAsByteArrayAsync());
+                    }
                 }
             }, async server =>
             {
