@@ -26,7 +26,14 @@ namespace System.Net.Http.Functional.Tests
 #else
         private const DecompressionMethods AllMethods = DecompressionMethods.Deflate | DecompressionMethods.GZip;
 #endif
+
         public HttpClientHandler_Decompression_Test(ITestOutputHelper output) : base(output) { }
+
+        // Notes:
+        // WinHttpHandler supports DecompressionMethods.Deflate incorrectly; it continues to use DeflateStream.
+        // WinHttpHandler also does not support DecompressionMethods.Brotli.
+        // So these variations are disabled for WinHttpHandler below.
+
 
         // Here's what I want in general.
         // I want to use the enum value in the InlineData.
@@ -53,49 +60,16 @@ namespace System.Net.Http.Functional.Tests
         [Theory]
         [InlineData(DecompressionMethods.GZip, false)]
         [InlineData(DecompressionMethods.GZip, true)]
+#if !NETFRAMEWORK
         [InlineData(DecompressionMethods.Deflate, false)]
         [InlineData(DecompressionMethods.Deflate, true)]
         [InlineData(DecompressionMethods.Brotli, false)]
         [InlineData(DecompressionMethods.Brotli, true)]
+#endif
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
         public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, bool enableAll)
         {
-            Func<Stream, Stream> compress;
-            DecompressionMethods methods;
-            switch (method)
-            {
-                case DecompressionMethods.GZip:
-                    compress = s => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true);
-                    break;
-
-#if !NETFRAMEWORK
-                case DecompressionMethods.Brotli:
-                    if (IsWinHttpHandler)
-                    {
-                        // Brotli only supported on SocketsHttpHandler.
-                        return;
-                    }
-
-                    compress = s => new BrotliStream(s, CompressionLevel.Optimal, leaveOpen: true);
-                    break;
-
-                case DecompressionMethods.Deflate:
-                    // WinHttpHandler continues to use DeflateStream as it doesn't have a newer build than netstandard2.0
-                    // and doesn't have access to ZLibStream.
-                    compress = IsWinHttpHandler ?
-                        new Func<Stream, Stream>(s => new DeflateStream(s, CompressionLevel.Optimal, leaveOpen: true)) :
-                        new Func<Stream, Stream>(s => new ZLibStream(s, CompressionLevel.Optimal, leaveOpen: true));
-                    break;
-#endif
-
-                default:
-                    //Assert.Contains(encodingName, new[] { "br", "deflate", "gzip" });
-                    return;
-            }
-
-            methods = enableAll ? AllMethods : method;
-
-            Assert.True(enableAll || method == methods);
+            DecompressionMethods methods = enableAll ? AllMethods : method;
 
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
