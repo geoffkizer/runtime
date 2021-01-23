@@ -84,7 +84,7 @@ namespace System.Net.Http.Functional.Tests
 
             string encodingName = GetEncodingName(method);
 
-            await LoopbackServer.CreateClientAndServerAsync(async uri =>
+            await LoopbackServerFactory.CreateClientAndServerAsync(async uri =>
             {
                 using (HttpClientHandler handler = CreateHttpClientHandler())
                 using (HttpClient client = CreateHttpClient(handler))
@@ -106,9 +106,9 @@ namespace System.Net.Http.Functional.Tests
             {
                 await server.AcceptConnectionAsync(async connection =>
                 {
-                    await connection.ReadRequestHeaderAsync();
-                    await connection.Writer.WriteAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\nContent-Length: {compressedContent.Length}\r\n\r\n");
-                    await connection.Stream.WriteAsync(compressedContent);
+                    await connection.ReadRequestDataAsync();
+                    await connection.SendResponseHeadersAsync(headers: new HttpHeaderData[] { new HttpHeaderData("Content-Encoding", encodingName), new HttpHeaderData("Content-Length", compressedContent.Length.ToString()) });
+                    await connection.SendResponseBodyAsync(compressedContent, isFinal: true);
                 });
             });
         }
