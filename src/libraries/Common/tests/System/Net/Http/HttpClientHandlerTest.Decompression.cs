@@ -85,6 +85,8 @@ namespace System.Net.Http.Functional.Tests
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
 
+            byte[] compressedContent = GetCompressedContent(method, expectedContent);
+
             string encodingName = GetEncodingName(method);
 
             await LoopbackServer.CreateClientAndServerAsync(async uri =>
@@ -94,25 +96,24 @@ namespace System.Net.Http.Functional.Tests
                 {
                     handler.AutomaticDecompression = methods;
 
-                    HttpResponseMessage response = await client.GetAsync(uri);
-                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    using (HttpResponseMessage response = await client.GetAsync(uri))
+                    {
+                        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-                    // Decompression should cause these headers to be removed, since they only apply to the compressed content
-                    Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
-                    Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
+                        // Decompression should cause these headers to be removed, since they only apply to the compressed content
+                        Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
+                        Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
 
-                    Assert.Equal<byte>(expectedContent, await response.Content.ReadAsByteArrayAsync());
+                        Assert.Equal<byte>(expectedContent, await response.Content.ReadAsByteArrayAsync());
+                    }
                 }
             }, async server =>
             {
                 await server.AcceptConnectionAsync(async connection =>
                 {
                     await connection.ReadRequestHeaderAsync();
-                    await connection.Writer.WriteAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\n\r\n");
-                    using (Stream compressedStream = GetCompressionStream(method, connection.Stream))
-                    {
-                        await compressedStream.WriteAsync(expectedContent);
-                    }
+                    await connection.Writer.WriteAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\nContent-Length: {compressedContent.Length}\r\n\r\n");
+                    await connection.Stream.WriteAsync(compressedContent);
                 });
             });
         }
