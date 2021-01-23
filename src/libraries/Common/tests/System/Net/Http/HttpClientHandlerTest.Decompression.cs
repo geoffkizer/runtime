@@ -28,17 +28,6 @@ namespace System.Net.Http.Functional.Tests
 #endif
         public HttpClientHandler_Decompression_Test(ITestOutputHelper output) : base(output) { }
 
-        public static IEnumerable<object[]> RemoteServersAndCompressionUris()
-        {
-            foreach (Configuration.Http.RemoteServer remoteServer in Configuration.Http.RemoteServers)
-            {
-                yield return new object[] { remoteServer, remoteServer.GZipUri };
-
-                // Remote deflate endpoint isn't correctly following the deflate protocol.
-                //yield return new object[] { remoteServer, remoteServer.DeflateUri };
-            }
-        }
-
         // Here's what I want in general.
         // I want to use the enum value in the InlineData.
         // I want helpers that will map this to a name and do compression on a byte[] -> byte[]. (Decompression too? Don't think I need it.)
@@ -181,68 +170,6 @@ namespace System.Net.Http.Functional.Tests
             });
         }
 
-        [OuterLoop("Uses external servers")]
-        [Theory, MemberData(nameof(RemoteServersAndCompressionUris))]
-        public async Task GetAsync_SetAutomaticDecompression_ContentDecompressed_GZip(Configuration.Http.RemoteServer remoteServer, Uri uri)
-        {
-            // Sync API supported only up to HTTP/1.1
-            if (!TestAsync && remoteServer.HttpVersion.Major >= 2)
-            {
-                return;
-            }
-
-            HttpClientHandler handler = CreateHttpClientHandler();
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-            using (HttpClient client = CreateHttpClientForRemoteServer(remoteServer, handler))
-            {
-                using (HttpResponseMessage response = await client.SendAsync(TestAsync, CreateRequest(HttpMethod.Get, uri, remoteServer.HttpVersion)))
-                {
-                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-                    Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
-                    Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
-                    string responseContent = await response.Content.ReadAsStringAsync();
-
-                    _output.WriteLine(responseContent);
-                    TestHelper.VerifyResponseBody(
-                        responseContent,
-                        response.Content.Headers.ContentMD5,
-                        false,
-                        null);
-                }
-            }
-        }
-
-        // The remote server endpoint was written to use DeflateStream, which isn't actually a correct
-        // implementation of the deflate protocol (the deflate protocol requires the zlib wrapper around
-        // deflate).  Until we can get that updated (and deal with previous releases still testing it
-        // via a DeflateStream-based implementation), we utilize httpbin.org to help validate behavior.
-        [OuterLoop("Uses external servers")]
-        [Theory]
-        [InlineData("http://httpbin.org/deflate", "\"deflated\": true")]
-        [InlineData("https://httpbin.org/deflate", "\"deflated\": true")]
-        public async Task GetAsync_SetAutomaticDecompression_ContentDecompressed_Deflate(string uri, string expectedContent)
-        {
-            if (IsWinHttpHandler)
-            {
-                // WinHttpHandler targets netstandard2.0 and still erroneously uses DeflateStream rather than ZlibStream for deflate.
-                return;
-            }
-
-            HttpClientHandler handler = CreateHttpClientHandler();
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-            using (HttpClient client = CreateHttpClient(handler))
-            using (HttpResponseMessage response = await client.GetAsync(uri))
-            {
-                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-                Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
-                Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
-
-                Assert.Contains(expectedContent, await response.Content.ReadAsStringAsync());
-            }
-        }
-
         [Theory]
 #if NETCOREAPP
         [InlineData(DecompressionMethods.Brotli, "br", "")]
@@ -305,6 +232,84 @@ namespace System.Net.Http.Functional.Tests
                     }
                 }
             });
+        }
+    }
+
+    public sealed class HttpClientHandler_Decompression_RemoteServer_Test : HttpClientHandlerTestBase
+    {
+        public HttpClientHandler_Decompression_RemoteServer_Test(ITestOutputHelper output) : base(output) { }
+
+        public static IEnumerable<object[]> RemoteServersAndCompressionUris()
+        {
+            foreach (Configuration.Http.RemoteServer remoteServer in Configuration.Http.RemoteServers)
+            {
+                yield return new object[] { remoteServer, remoteServer.GZipUri };
+
+                // Remote deflate endpoint isn't correctly following the deflate protocol.
+                //yield return new object[] { remoteServer, remoteServer.DeflateUri };
+            }
+        }
+
+        [OuterLoop("Uses external servers")]
+        [Theory, MemberData(nameof(RemoteServersAndCompressionUris))]
+        public async Task GetAsync_SetAutomaticDecompression_ContentDecompressed_GZip(Configuration.Http.RemoteServer remoteServer, Uri uri)
+        {
+            // Sync API supported only up to HTTP/1.1
+            if (!TestAsync && remoteServer.HttpVersion.Major >= 2)
+            {
+                return;
+            }
+
+            HttpClientHandler handler = CreateHttpClientHandler();
+            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            using (HttpClient client = CreateHttpClientForRemoteServer(remoteServer, handler))
+            {
+                using (HttpResponseMessage response = await client.SendAsync(TestAsync, CreateRequest(HttpMethod.Get, uri, remoteServer.HttpVersion)))
+                {
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                    Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
+                    Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
+                    string responseContent = await response.Content.ReadAsStringAsync();
+
+                    _output.WriteLine(responseContent);
+                    TestHelper.VerifyResponseBody(
+                        responseContent,
+                        response.Content.Headers.ContentMD5,
+                        false,
+                        null);
+                }
+            }
+        }
+
+        // The remote server endpoint was written to use DeflateStream, which isn't actually a correct
+        // implementation of the deflate protocol (the deflate protocol requires the zlib wrapper around
+        // deflate).  Until we can get that updated (and deal with previous releases still testing it
+        // via a DeflateStream-based implementation), we utilize httpbin.org to help validate behavior.
+        [OuterLoop("Uses external servers")]
+        [Theory]
+        [InlineData("http://httpbin.org/deflate", "\"deflated\": true")]
+        [InlineData("https://httpbin.org/deflate", "\"deflated\": true")]
+        public async Task GetAsync_SetAutomaticDecompression_ContentDecompressed_Deflate(string uri, string expectedContent)
+        {
+            if (IsWinHttpHandler)
+            {
+                // WinHttpHandler targets netstandard2.0 and still erroneously uses DeflateStream rather than ZlibStream for deflate.
+                return;
+            }
+
+            HttpClientHandler handler = CreateHttpClientHandler();
+            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            using (HttpClient client = CreateHttpClient(handler))
+            using (HttpResponseMessage response = await client.GetAsync(uri))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
+                Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
+
+                Assert.Contains(expectedContent, await response.Content.ReadAsStringAsync());
+            }
         }
     }
 }
