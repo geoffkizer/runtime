@@ -57,6 +57,17 @@ namespace System.Net.Http.Functional.Tests
                 _ => throw new InvalidOperationException($"unexpected DecompressionMethod {method}")
             };
 
+        private static byte[] GetCompressedContent(DecompressionMethods method, byte[] content)
+        {
+            var compressedContentStream = new MemoryStream();
+            using (Stream s = GetCompressionStream(method, compressedContentStream))
+            {
+                s.Write(content);
+            }
+
+            return compressedContentStream.ToArray();
+        }
+
         [Theory]
         [InlineData(DecompressionMethods.GZip, false)]
         [InlineData(DecompressionMethods.GZip, true)]
@@ -116,20 +127,14 @@ namespace System.Net.Http.Functional.Tests
         [InlineData(DecompressionMethods.Brotli, true)]
 #endif
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task CompressedResponse_DecompressionNotEnabled_OriginalContentReturned(
-            DecompressionMethods method, bool enableNone)
+        public async Task CompressedResponse_DecompressionNotEnabled_OriginalContentReturned(DecompressionMethods method, bool enableNone)
         {
             DecompressionMethods methods = enableNone ? DecompressionMethods.None : AllMethods & ~method;
 
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
 
-            var compressedContentStream = new MemoryStream();
-            using (Stream s = GetCompressionStream(method, compressedContentStream))
-            {
-                await s.WriteAsync(expectedContent);
-            }
-            byte[] compressedContent = compressedContentStream.ToArray();
+            byte[] compressedContent = GetCompressedContent(method, expectedContent);
 
             string encodingName = GetEncodingName(method);
 
