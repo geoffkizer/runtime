@@ -30,15 +30,10 @@ namespace System.Net.Http.Functional.Tests
 
         public HttpClientHandler_Decompression_Test(ITestOutputHelper output) : base(output) { }
 
-        // Notes:
+        // WinHttpHandler/.NET Framework notes:
         // WinHttpHandler supports DecompressionMethods.Deflate incorrectly; it continues to use DeflateStream.
         // WinHttpHandler also does not support DecompressionMethods.Brotli.
         // So these variations are disabled for WinHttpHandler below.
-
-
-        // Here's what I want in general.
-        // I want to use the enum value in the InlineData.
-        // I want helpers that will map this to a name and do compression on a byte[] -> byte[]. (Decompression too? Don't think I need it.)
 
         private static string GetEncodingName(DecompressionMethods method) =>
             method switch
@@ -105,7 +100,7 @@ namespace System.Net.Http.Functional.Tests
                         Assert.False(response.Content.Headers.Contains("Content-Encoding"), "Content-Encoding unexpectedly found");
                         Assert.False(response.Content.Headers.Contains("Content-Length"), "Content-Length unexpectedly found");
 
-                        Assert.Equal<byte>(expectedContent, await response.Content.ReadAsByteArrayAsync());
+                        AssertExtensions.SequenceEqual(expectedContent, await response.Content.ReadAsByteArrayAsync());
                     }
                 }
             }, async server =>
@@ -156,7 +151,7 @@ namespace System.Net.Http.Functional.Tests
                         Assert.Equal(encodingName, response.Content.Headers.ContentEncoding.First());
                         Assert.Equal(compressedContent.Length, response.Content.Headers.ContentLength);
 
-                        Assert.Equal<byte>(compressedContent, await response.Content.ReadAsByteArrayAsync());
+                        AssertExtensions.SequenceEqual(compressedContent, await response.Content.ReadAsByteArrayAsync());
                     }
                 }
             }, async server =>
