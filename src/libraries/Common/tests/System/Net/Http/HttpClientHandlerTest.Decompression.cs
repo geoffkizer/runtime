@@ -106,49 +106,20 @@ namespace System.Net.Http.Functional.Tests
             });
         }
 
-        public static IEnumerable<object[]> DecompressedResponse_MethodNotSpecified_OriginalContentReturned_MemberData()
-        {
-            yield return new object[]
-            {
-                DecompressionMethods.GZip,
-                DecompressionMethods.None
-            };
-            yield return new object[]
-            {
-                DecompressionMethods.GZip,
-                DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            };
-#if !NETFRAMEWORK
-            yield return new object[]
-            {
-                DecompressionMethods.Deflate,
-                DecompressionMethods.None
-            };
-            yield return new object[]
-            {
-                DecompressionMethods.Deflate,
-                DecompressionMethods.GZip | DecompressionMethods.Brotli
-            };
-            yield return new object[]
-            {
-                DecompressionMethods.Brotli,
-                DecompressionMethods.None
-            };
-            yield return new object[]
-            {
-                DecompressionMethods.Brotli,
-                DecompressionMethods.Deflate | DecompressionMethods.GZip
-            };
-#endif
-        }
-
         [Theory]
-        [MemberData(nameof(DecompressedResponse_MethodNotSpecified_OriginalContentReturned_MemberData))]
+        [InlineData(DecompressionMethods.GZip, false)]
+        [InlineData(DecompressionMethods.GZip, true)]
+#if !NETFRAMEWORK
+        [InlineData(DecompressionMethods.Deflate, false)]
+        [InlineData(DecompressionMethods.Deflate, true)]
+        [InlineData(DecompressionMethods.Brotli, false)]
+        [InlineData(DecompressionMethods.Brotli, true)]
+#endif
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
         public async Task CompressedResponse_DecompressionNotEnabled_OriginalContentReturned(
-            DecompressionMethods method, DecompressionMethods methods)
+            DecompressionMethods method, bool enableNone)
         {
-            string encodingName = GetEncodingName(method);
+            DecompressionMethods methods = enableNone ? DecompressionMethods.None : AllMethods & ~method;
 
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
@@ -159,6 +130,8 @@ namespace System.Net.Http.Functional.Tests
                 await s.WriteAsync(expectedContent);
             }
             byte[] compressedContent = compressedContentStream.ToArray();
+
+            string encodingName = GetEncodingName(method);
 
             await LoopbackServer.CreateClientAndServerAsync(async uri =>
             {
