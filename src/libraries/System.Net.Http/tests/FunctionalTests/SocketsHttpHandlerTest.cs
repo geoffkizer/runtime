@@ -3123,4 +3123,19 @@ namespace System.Net.Http.Functional.Tests
         protected override Version UseVersion => HttpVersion.Version30;
         protected override QuicImplementationProvider UseQuicImplementationProvider => QuicImplementationProviders.Mock;
     }
+
+    [ConditionalClass(typeof(HttpClientHandlerTestBase), nameof(IsMsQuicSupported))]
+    public sealed class SocketsHttpHandler_HttpClientHandler_Decompression_Http3_MsQuic : HttpClientHandler_Decompression_Test
+    {
+        public SocketsHttpHandler_HttpClientHandler_Decompression_Http3_MsQuic(ITestOutputHelper output) : base(output) { }
+        protected override Version UseVersion => HttpVersion.Version30;
+        protected override QuicImplementationProvider UseQuicImplementationProvider => QuicImplementationProviders.MsQuic;
+    }
+
+    public sealed class SocketsHttpHandler_HttpClientHandler_Decompression_Http3_Mock : HttpClientHandler_Decompression_Test
+    {
+        public SocketsHttpHandler_HttpClientHandler_Decompression_Http3_Mock(ITestOutputHelper output) : base(output) { }
+        protected override Version UseVersion => HttpVersion.Version30;
+        protected override QuicImplementationProvider UseQuicImplementationProvider => QuicImplementationProviders.Mock;
+    }
 }
