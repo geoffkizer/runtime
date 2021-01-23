@@ -49,11 +49,11 @@ namespace System.Net.Http.Functional.Tests
         [InlineData(DecompressionMethods.Brotli, "br", false)]
         [InlineData(DecompressionMethods.Brotli, "br", true)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, string encodingName, bool enableAll)
+        public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, string e, bool enableAll)
         {
             Func<Stream, Stream> compress;
             DecompressionMethods methods;
-            switch (encodingName)
+            switch (e)
             {
                 case "gzip":
                     compress = s => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true);
@@ -90,6 +90,8 @@ namespace System.Net.Http.Functional.Tests
 
             var expectedContent = new byte[12345];
             new Random(42).NextBytes(expectedContent);
+
+            string encodingName = GetEncodingName(method);
 
             await LoopbackServer.CreateClientAndServerAsync(async uri =>
             {
