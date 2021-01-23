@@ -107,7 +107,11 @@ namespace System.Net.Http.Functional.Tests
                 await server.AcceptConnectionAsync(async connection =>
                 {
                     await connection.ReadRequestHeaderAsync();
-                    await connection.WriteStringAsync($"HTTP/1.1 200 OK\r\nContent-Encoding: {encodingName}\r\nContent-Length: {compressedContent.Length}\r\n\r\n");
+                    await connection.SendResponseHeadersAsync(headers: new HttpHeaderData[]
+                        {
+                            new HttpHeaderData("Content-Encoding", encodingName),
+                            new HttpHeaderData("Content-Length", compressedContent.Length.ToString())
+                        });
                     await connection.Stream.WriteAsync(compressedContent);
                 });
             });

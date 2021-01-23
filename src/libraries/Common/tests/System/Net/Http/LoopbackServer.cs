@@ -891,7 +891,7 @@ namespace System.Net.Test.Common
                     }
                 }
 
-                headerString = GetHttpResponseHeaders(statusCode, headerString, 0, connectionClose: true);
+                headerString = GetConnectionCloseResponse(statusCode, headerString);
 
                 await SendResponseAsync(headerString).ConfigureAwait(false);
             }

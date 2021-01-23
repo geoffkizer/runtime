@@ -49,6 +49,8 @@ namespace System.Net.Http.Functional.Tests
                         await connection.SendResponseHeadersAsync(headers: new HttpHeaderData[] { new HttpHeaderData("SomeHeaderName", "AndValue") });
                         await connection.WaitForCancellationAsync();
                     }
+                    catch (Exception)
+                    { }
                     finally
                     {
                         Volatile.Write(ref stopGCs, true);
