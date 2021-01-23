@@ -210,15 +210,17 @@ namespace System.Net.Http.Functional.Tests
             {
                 List<string> requestLines = await server.AcceptConnectionSendResponseAndCloseAsync();
 
-                // This is stupid
-                string requestLinesString = string.Join("\r\n", requestLines);
-                _output.WriteLine(requestLinesString);
+                string acceptEncodingLine = requestLines.Where(x => x.StartsWith("Accept-Encoding:")).Single();
 
-                Assert.InRange(Regex.Matches(requestLinesString, "Accept-Encoding").Count, 1, 1);
-                Assert.InRange(Regex.Matches(requestLinesString, encodings).Count, 1, 1);
+                // This is stupid
+                //string requestLinesString = string.Join("\r\n", requestLines);
+                //_output.WriteLine(requestLinesString);
+
+                //Assert.InRange(Regex.Matches(requestLinesString, "Accept-Encoding").Count, 1, 1);
+                Assert.InRange(Regex.Matches(acceptEncodingLine, encodings).Count, 1, 1);
                 if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValues))
                 {
-                    Assert.InRange(Regex.Matches(requestLinesString, manualAcceptEncodingHeaderValues).Count, 1, 1);
+                    Assert.InRange(Regex.Matches(acceptEncodingLine, manualAcceptEncodingHeaderValues).Count, 1, 1);
                 }
             });
         }
