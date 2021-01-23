@@ -113,11 +113,26 @@ namespace System.Net.Http.Functional.Tests
                 DecompressionMethods.GZip,
                 DecompressionMethods.None
             };
+            yield return new object[]
+            {
+                DecompressionMethods.GZip,
+                DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            };
 #if !NETFRAMEWORK
             yield return new object[]
             {
                 DecompressionMethods.Deflate,
-                DecompressionMethods.Brotli
+                DecompressionMethods.None
+            };
+            yield return new object[]
+            {
+                DecompressionMethods.Deflate,
+                DecompressionMethods.GZip | DecompressionMethods.Brotli
+            };
+            yield return new object[]
+            {
+                DecompressionMethods.Brotli,
+                DecompressionMethods.None
             };
             yield return new object[]
             {
