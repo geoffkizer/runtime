@@ -42,25 +42,25 @@ namespace System.Net.Http.Functional.Tests
             };
 
         [Theory]
-        [InlineData(DecompressionMethods.GZip, "gzip", false)]
-        [InlineData(DecompressionMethods.GZip, "gzip", true)]
-        [InlineData(DecompressionMethods.Deflate, "deflate", false)]
-        [InlineData(DecompressionMethods.Deflate, "deflate", true)]
-        [InlineData(DecompressionMethods.Brotli, "br", false)]
-        [InlineData(DecompressionMethods.Brotli, "br", true)]
+        [InlineData(DecompressionMethods.GZip, false)]
+        [InlineData(DecompressionMethods.GZip, true)]
+        [InlineData(DecompressionMethods.Deflate, false)]
+        [InlineData(DecompressionMethods.Deflate, true)]
+        [InlineData(DecompressionMethods.Brotli, false)]
+        [InlineData(DecompressionMethods.Brotli, true)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
-        public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, string e, bool enableAll)
+        public async Task CompressedResponse_DecompressionEnabled_DecompressedContentReturned(DecompressionMethods method, bool enableAll)
         {
             Func<Stream, Stream> compress;
             DecompressionMethods methods;
-            switch (e)
+            switch (method)
             {
-                case "gzip":
+                case DecompressionMethods.GZip:
                     compress = s => new GZipStream(s, CompressionLevel.Optimal, leaveOpen: true);
                     break;
 
 #if !NETFRAMEWORK
-                case "br":
+                case DecompressionMethods.Brotli:
                     if (IsWinHttpHandler)
                     {
                         // Brotli only supported on SocketsHttpHandler.
@@ -70,7 +70,7 @@ namespace System.Net.Http.Functional.Tests
                     compress = s => new BrotliStream(s, CompressionLevel.Optimal, leaveOpen: true);
                     break;
 
-                case "deflate":
+                case DecompressionMethods.Deflate:
                     // WinHttpHandler continues to use DeflateStream as it doesn't have a newer build than netstandard2.0
                     // and doesn't have access to ZLibStream.
                     compress = IsWinHttpHandler ?
