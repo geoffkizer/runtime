@@ -184,7 +184,7 @@ namespace System.Net.Http.Functional.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/39187", TestPlatforms.Browser)]
         public async Task GetAsync_SetAutomaticDecompressionAndManualAcceptEncodingHeader_AcceptEncodingHeaderSentCorrecltyWithNoDuplicates(
             DecompressionMethods methods,
-            string manualAcceptEncodingHeaderValues,
+            string manualAcceptEncodingHeaderValue,
             string expectedHeaderValue)
         {
             await LoopbackServer.CreateClientAndServerAsync(async uri =>
@@ -194,9 +194,9 @@ namespace System.Net.Http.Functional.Tests
                 {
                     handler.AutomaticDecompression = methods;
                     HttpRequestMessage request = CreateRequest(HttpMethod.Get, uri, UseVersion);
-                    if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValues))
+                    if (!string.IsNullOrEmpty(manualAcceptEncodingHeaderValue))
                     {
-                        request.Headers.Add("Accept-Encoding", manualAcceptEncodingHeaderValues);
+                        request.Headers.Add("Accept-Encoding", manualAcceptEncodingHeaderValue);
                     }
 
                     using (HttpResponseMessage response = await client.SendAsync(TestAsync, request))
