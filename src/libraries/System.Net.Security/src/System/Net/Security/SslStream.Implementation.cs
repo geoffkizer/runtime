@@ -768,6 +768,12 @@ namespace System.Net.Security
                         return CopyDecryptedData(buffer);
                     }
 
+                    if (buffer.Length == 0 && _internalBuffer is null)
+                    {
+                        // User requested a zero-byte read, and we have no data available in the buffer for processing.
+                        // TODO
+                    }
+
                     ResetReadBuffer();
 
                     // Read the next frame header.
