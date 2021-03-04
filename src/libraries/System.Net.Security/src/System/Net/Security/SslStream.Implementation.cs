@@ -771,7 +771,13 @@ namespace System.Net.Security
                     if (buffer.Length == 0 && _internalBuffer is null)
                     {
                         // User requested a zero-byte read, and we have no data available in the buffer for processing.
-                        // TODO
+                        // This zero-byte read indicates their desire to trade off the extra cost of a zero-byte read
+                        // for reduced memory consumption when data is not immediately available.
+                        // So, we will issue our own zero-byte read against the underlying stream and defer buffer allocation
+                        // until data is actually available from the underlying stream.
+                        // Note that if the underlying stream does not supporting blocking on zero byte reads, then this will
+                        // complete immediately and won't save any memory, but will still function correctly.
+                        await adapter.ReadAsync(Memory<byte>.Empty).ConfigureAwait(false);
                     }
 
                     ResetReadBuffer();
