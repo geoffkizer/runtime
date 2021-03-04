@@ -2808,8 +2808,7 @@ namespace System.IO.Tests
                 return;
             }
 
-            // This is the data we will send across the connected streams.
-            // Note we assume that "hello world" will both
+            // This is the data we will send across the connected streams. We assume this data will both
             // (a) produce at least two readable bytes, so we can unblock the reader and read a single byte without clearing its buffer; and
             // (b) produce no more than 1K of readable bytes, so we can clear the reader buffer below.
             // If this isn't the case for some Stream(s), we can modify the data or parameterize it per Stream.
@@ -2829,12 +2828,8 @@ namespace System.IO.Tests
             {
                 int originalCount = tracker.ZeroByteReadCount;
 
-                // Issue zero byte read against wrapper stream. This should not complete yet.
+                // Issue zero byte read against wrapper stream.
                 Task<int> zeroByteRead = Task.Run(() => ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0));
-                Assert.False(zeroByteRead.IsCompleted);
-
-                // It should have issued a zero-byte read against the underlying stream.
-                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
 
                 // Write some data (see notes above re 'data')
                 await writeable.WriteAsync(data);
@@ -2843,7 +2838,7 @@ namespace System.IO.Tests
                     await writeable.FlushAsync();
                 }
 
-                // Reader should be unblocked
+                // Reader should be unblocked, and we should have issued a zero byte read against the underlying stream as part of unblocking.
                 int bytesRead = await zeroByteRead;
                 Assert.Equal(0, bytesRead);
                 Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
@@ -2857,8 +2852,12 @@ namespace System.IO.Tests
                 Assert.Equal(1, bytesRead);
                 Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
 
+                // Issue zero byte read against wrapper stream. Since there is still data available, this should complete immediately and not do another zero-byte read.
+                Assert.Equal(0, await ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0));
+                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+
                 // Clear the reader stream of any buffered data by doing a large read, which again should not block.
-                readTask = ReadAsync(mode, readable, buffer, 1, buffer.Length);
+                readTask = ReadAsync(mode, readable, buffer, 1, buffer.Length - 1);
                 Assert.True(readTask.IsCompleted);
                 bytesRead += await readTask;
                 Assert.True(bytesRead > 1);
@@ -2866,7 +2865,7 @@ namespace System.IO.Tests
 
                 if (FlushGuaranteesAllDataWritten)
                 {
-                    AssertExtensions.SequenceEqual(data, buffer.AsSpan().Slice(bytesRead));
+                    AssertExtensions.SequenceEqual(data, buffer.AsSpan().Slice(0, bytesRead));
                 }
             }
         }
