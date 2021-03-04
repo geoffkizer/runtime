@@ -2817,19 +2817,21 @@ namespace System.IO.Tests
             using StreamPair innerStreams = ConnectedStreams.CreateBidirectional();
             (Stream innerWriteable, Stream innerReadable) = GetReadWritePair(innerStreams);
 
-            var tracker = new ZeroByteReadCountStream(innerReadable);
+            var tracker = new ZeroByteReadTrackingStream(innerReadable);
             using StreamPair streams = await CreateWrappedConnectedStreamsAsync((innerWriteable, tracker));
 
             (Stream writeable, Stream readable) = GetReadWritePair(streams);
 
-            Assert.Equal(0, tracker.ZeroByteReadCount);
-
             for (int iter = 0; iter < 2; iter++)
             {
-                int originalCount = tracker.ZeroByteReadCount;
+                // Register to be signalled for the zero byte read.
+                var signalTask = tracker.WaitForZeroByteReadAsync();
 
                 // Issue zero byte read against wrapper stream.
                 Task<int> zeroByteRead = Task.Run(() => ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0));
+
+                // The tracker stream will signal us when the zero byte read actually happens.
+                await signalTask;
 
                 // Write some data (see notes above re 'data')
                 await writeable.WriteAsync(data);
@@ -2841,7 +2843,6 @@ namespace System.IO.Tests
                 // Reader should be unblocked, and we should have issued a zero byte read against the underlying stream as part of unblocking.
                 int bytesRead = await zeroByteRead;
                 Assert.Equal(0, bytesRead);
-                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
 
                 byte[] buffer = new byte[1024];
 
@@ -2850,18 +2851,16 @@ namespace System.IO.Tests
                 Assert.True(readTask.IsCompleted);
                 bytesRead = await readTask;
                 Assert.Equal(1, bytesRead);
-                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
 
                 // Issue zero byte read against wrapper stream. Since there is still data available, this should complete immediately and not do another zero-byte read.
-                Assert.Equal(0, await ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0));
-                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+                readTask = ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0);
+                Assert.True(readTask.IsCompleted);
+                Assert.Equal(0, await readTask);
 
                 // Clear the reader stream of any buffered data by doing a large read, which again should not block.
                 readTask = ReadAsync(mode, readable, buffer, 1, buffer.Length - 1);
                 Assert.True(readTask.IsCompleted);
                 bytesRead += await readTask;
-                Assert.True(bytesRead > 1);
-                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
 
                 if (FlushGuaranteesAllDataWritten)
                 {
@@ -2870,19 +2869,37 @@ namespace System.IO.Tests
             }
         }
 
-        private sealed class ZeroByteReadCountStream : DelegatingStream
+        private sealed class ZeroByteReadTrackingStream : DelegatingStream
         {
-            public ZeroByteReadCountStream(Stream innerStream) : base(innerStream)
+            private TaskCompletionSource? _signal;
+
+            public ZeroByteReadTrackingStream(Stream innerStream) : base(innerStream)
             {
             }
 
-            public int ZeroByteReadCount { get; private set; }
+            public Task WaitForZeroByteReadAsync()
+            {
+                if (_signal is not null)
+                {
+                    throw new Exception("Already registered to wait");
+                }
+
+                _signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                return _signal.Task;
+            }
 
             private void CheckForZeroByteRead(int bufferLength)
             {
                 if (bufferLength == 0)
                 {
-                    ZeroByteReadCount++;
+                    var signal = _signal;
+                    if (signal is null)
+                    {
+                        throw new Exception("Unexpected zero byte read");
+                    }
+
+                    _signal = null;
+                    signal.SetResult();
                 }
             }
 
