@@ -2612,6 +2612,11 @@ namespace System.IO.Tests
         protected abstract Task<StreamPair> CreateWrappedConnectedStreamsAsync(StreamPair wrapped, bool leaveOpen = false);
         protected virtual bool WrappedUsableAfterClose => true;
         protected virtual bool SupportsLeaveOpen => true;
+        /// <summary>
+        /// Indicates whether the stream will issue a zero byte read on the underlying stream when a user performs
+        /// a zero byte read and no data is currently available to return to the user.
+        /// </summary>
+        protected virtual bool ZeroByteReadPerformsZeroByteReadOnUnderlyingStream => false;
 
         [Theory]
         [InlineData(false)]
@@ -2786,6 +2791,130 @@ namespace System.IO.Tests
                         }
                         Assert.Equal(-1, readable.ReadByte());
                     }));
+            }
+        }
+
+        [Theory]
+        [InlineData(ReadWriteMode.SyncArray)]
+        [InlineData(ReadWriteMode.SyncSpan)]
+        [InlineData(ReadWriteMode.AsyncArray)]
+        [InlineData(ReadWriteMode.AsyncMemory)]
+        [InlineData(ReadWriteMode.SyncAPM)]
+        [InlineData(ReadWriteMode.AsyncAPM)]
+        public virtual async Task ZeroByteRead_PerformsZeroByteReadOnUnderlyingStreamWhenDataNeeded(ReadWriteMode mode)
+        {
+            if (!ZeroByteReadPerformsZeroByteReadOnUnderlyingStream)
+            {
+                return;
+            }
+
+            // This is the data we will send across the connected streams.
+            // Note we assume that "hello world" will both
+            // (a) produce at least two readable bytes, so we can unblock the reader and read a single byte without clearing its buffer; and
+            // (b) produce no more than 1K of readable bytes, so we can clear the reader buffer below.
+            // If this isn't the case for some Stream(s), we can modify the data or parameterize it per Stream.
+            byte[] data = Encoding.UTF8.GetBytes("hello world");
+
+            using StreamPair innerStreams = ConnectedStreams.CreateBidirectional();
+            (Stream innerWriteable, Stream innerReadable) = GetReadWritePair(innerStreams);
+
+            var tracker = new ZeroByteReadCountStream(innerReadable);
+            using StreamPair streams = await CreateWrappedConnectedStreamsAsync((innerWriteable, tracker));
+
+            (Stream writeable, Stream readable) = GetReadWritePair(streams);
+
+            Assert.Equal(0, tracker.ZeroByteReadCount);
+
+            for (int iter = 0; iter < 2; iter++)
+            {
+                int originalCount = tracker.ZeroByteReadCount;
+
+                // Issue zero byte read against wrapper stream. This should not complete yet.
+                Task<int> zeroByteRead = Task.Run(() => ReadAsync(mode, readable, Array.Empty<byte>(), 0, 0));
+                Assert.False(zeroByteRead.IsCompleted);
+
+                // It should have issued a zero-byte read against the underlying stream.
+                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+
+                // Write some data (see notes above re 'data')
+                await writeable.WriteAsync(data);
+                if (FlushRequiredToWriteData)
+                {
+                    await writeable.FlushAsync();
+                }
+
+                // Reader should be unblocked
+                int bytesRead = await zeroByteRead;
+                Assert.Equal(0, bytesRead);
+                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+
+                byte[] buffer = new byte[1024];
+
+                // Should be able to read one byte without blocking
+                var readTask = ReadAsync(mode, readable, buffer, 0, 1);
+                Assert.True(readTask.IsCompleted);
+                bytesRead = await readTask;
+                Assert.Equal(1, bytesRead);
+                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+
+                // Clear the reader stream of any buffered data by doing a large read, which again should not block.
+                readTask = ReadAsync(mode, readable, buffer, 1, buffer.Length);
+                Assert.True(readTask.IsCompleted);
+                bytesRead += await readTask;
+                Assert.True(bytesRead > 1);
+                Assert.Equal(originalCount + 1, tracker.ZeroByteReadCount);
+
+                if (FlushGuaranteesAllDataWritten)
+                {
+                    AssertExtensions.SequenceEqual(data, buffer.AsSpan().Slice(bytesRead));
+                }
+            }
+        }
+
+        private sealed class ZeroByteReadCountStream : DelegatingStream
+        {
+            public ZeroByteReadCountStream(Stream innerStream) : base(innerStream)
+            {
+            }
+
+            public int ZeroByteReadCount { get; private set; }
+
+            private void CheckForZeroByteRead(int bufferLength)
+            {
+                if (bufferLength == 0)
+                {
+                    ZeroByteReadCount++;
+                }
+            }
+
+            public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state)
+            {
+                CheckForZeroByteRead(count);
+                return base.BeginRead(buffer, offset, count, callback, state);
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                CheckForZeroByteRead(count);
+                return base.Read(buffer, offset, count);
+            }
+
+            public override int Read(Span<byte> buffer)
+            {
+                CheckForZeroByteRead(buffer.Length);
+                return base.Read(buffer);
+            }
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                CheckForZeroByteRead(count);
+                return base.ReadAsync(buffer, offset, count, cancellationToken);
+            }
+
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                CheckForZeroByteRead(buffer.Length);
+                return base.ReadAsync(buffer, cancellationToken);
             }
         }
     }
