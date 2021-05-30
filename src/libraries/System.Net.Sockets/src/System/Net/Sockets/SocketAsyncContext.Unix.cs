@@ -1405,11 +1405,37 @@ namespace System.Net.Sockets
                     e.Reset();
 
                     // We've been signalled to try to process the operation.
-                    OperationResult result = queue.ProcessQueuedOperation(operation);
-                    if (result == OperationResult.Completed ||
-                        result == OperationResult.Cancelled)
+                    //OperationResult result = queue.ProcessQueuedOperation(operation);
+
+                    if (!queue.ShouldProcessQueuedOperation(operation, out observedSequenceNumber))
                     {
-                        break;
+                        // Cancellation
+                        return;
+                    }
+
+                    while (true)
+                    {
+                        // Try to perform the IO
+                        OperationResult result = queue.InvokeQueuedOperation(operation);
+                        if (result != OperationResult.Pending)
+                        {
+                            // Remove the op from the queue and see if there's more to process.
+                            queue.HandleProcessQueuedOperationSuccess(operation);
+                            return;
+                        }
+
+                        // Check for retry and reset queue state.
+                        result = queue.HandleProcessQueuedOperationFailure(operation, ref observedSequenceNumber);
+                        if (result == OperationResult.Cancelled)
+                        {
+                            // Done
+                            return;
+                        }
+
+                        if (result != OperationResult.Completed)    // indicates we need to retry
+                        {
+                            break;
+                        }
                     }
 
                     // Couldn't process the operation.
