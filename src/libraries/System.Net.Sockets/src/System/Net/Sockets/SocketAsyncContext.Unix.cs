@@ -986,11 +986,12 @@ namespace System.Net.Sockets
                 Cancelled = 2
             }
 
-            public OperationResult ProcessQueuedOperation(TOperation op)
+            // NOTE: FOr now I'm using Completed here in a bit of a weird way, to indicate either actually completed, or should attempt to complete... clean this up.
+
+            public OperationResult ShouldProcessQueuedOperation(TOperation op, out int observedSequenceNumber)
             {
                 SocketAsyncContext context = op.AssociatedContext;
 
-                int observedSequenceNumber;
                 using (Lock())
                 {
                     Trace(context, $"Enter");
@@ -999,6 +1000,7 @@ namespace System.Net.Sockets
                     {
                         Debug.Assert(_tail == null);
                         Trace(context, $"Exit (stopped)");
+                        observedSequenceNumber = default;
                         return OperationResult.Cancelled;
                     }
                     else
@@ -1009,6 +1011,96 @@ namespace System.Net.Sockets
                         observedSequenceNumber = _sequenceNumber;
                     }
                 }
+
+                return OperationResult.Completed;
+            }
+
+            public OperationResult HandleProcessQueuedOperationFailure(TOperation op, ref int observedSequenceNumber)
+            {
+                SocketAsyncContext context = op.AssociatedContext;
+
+                // Check for retry and reset queue state.
+
+                using (Lock())
+                {
+                    if (_state == QueueState.Stopped)
+                    {
+                        Debug.Assert(_tail == null);
+                        Trace(context, $"Exit (stopped)");
+                        return OperationResult.Cancelled;
+                    }
+                    else
+                    {
+                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+
+                        if (observedSequenceNumber != _sequenceNumber)
+                        {
+                            // We received another epoll notification since we previously checked it.
+                            // So, we need to retry the operation.
+                            Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
+                            observedSequenceNumber = _sequenceNumber;
+                            return OperationResult.Completed;
+                        }
+                        else
+                        {
+                            _state = QueueState.Waiting;
+                            Trace(context, $"Exit (received EAGAIN)");
+                            return OperationResult.Pending;
+                        }
+                    }
+                }
+            }
+
+            public void HandleProcessQueuedOperationSuccess(TOperation op)
+            {
+                SocketAsyncContext context = op.AssociatedContext;
+
+                // Remove the op from the queue and see if there's more to process.
+
+                AsyncOperation? nextOp = null;
+                using (Lock())
+                {
+                    if (_state == QueueState.Stopped)
+                    {
+                        Debug.Assert(_tail == null);
+                        Trace(context, $"Exit (stopped)");
+                    }
+                    else
+                    {
+                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
+                        Debug.Assert(_tail != null, "Unexpected empty queue while processing I/O");
+                        Debug.Assert(_tail.Next == op, "Queue modified while processing queue");
+
+                        if (op == _tail)
+                        {
+                            // No more operations to process
+                            _tail = null;
+                            _isNextOperationSynchronous = false;
+                            _state = QueueState.Ready;
+                            _sequenceNumber++;
+                            Trace(context, $"Exit (finished queue)");
+                        }
+                        else
+                        {
+                            // Pop current operation and advance to next
+                            nextOp = _tail.Next = op.Next;
+                            _isNextOperationSynchronous = nextOp.Event != null;
+                        }
+                    }
+                }
+
+                nextOp?.Dispatch();
+            }
+
+            public OperationResult ProcessQueuedOperation(TOperation op)
+            {
+                OperationResult result = ShouldProcessQueuedOperation(op, out int observedSequenceNumber);
+                if (result != OperationResult.Completed)
+                {
+                    return result;
+                }
+
+                SocketAsyncContext context = op.AssociatedContext;
 
                 bool wasCompleted = false;
                 while (true)
@@ -1032,70 +1124,15 @@ namespace System.Net.Sockets
                     op.SetWaiting();
 
                     // Check for retry and reset queue state.
-
-                    using (Lock())
+                    result = HandleProcessQueuedOperationFailure(op, ref observedSequenceNumber);
+                    if (result != OperationResult.Completed)
                     {
-                        if (_state == QueueState.Stopped)
-                        {
-                            Debug.Assert(_tail == null);
-                            Trace(context, $"Exit (stopped)");
-                            return OperationResult.Cancelled;
-                        }
-                        else
-                        {
-                            Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-
-                            if (observedSequenceNumber != _sequenceNumber)
-                            {
-                                // We received another epoll notification since we previously checked it.
-                                // So, we need to retry the operation.
-                                Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
-                                observedSequenceNumber = _sequenceNumber;
-                            }
-                            else
-                            {
-                                _state = QueueState.Waiting;
-                                Trace(context, $"Exit (received EAGAIN)");
-                                return OperationResult.Pending;
-                            }
-                        }
+                        return result;
                     }
                 }
 
                 // Remove the op from the queue and see if there's more to process.
-
-                AsyncOperation? nextOp = null;
-                using (Lock())
-                {
-                    if (_state == QueueState.Stopped)
-                    {
-                        Debug.Assert(_tail == null);
-                        Trace(context, $"Exit (stopped)");
-                    }
-                    else
-                    {
-                        Debug.Assert(_state == QueueState.Processing, $"_state={_state} while processing queue!");
-                        Debug.Assert(_tail.Next == op, "Queue modified while processing queue");
-
-                        if (op == _tail)
-                        {
-                            // No more operations to process
-                            _tail = null;
-                            _isNextOperationSynchronous = false;
-                            _state = QueueState.Ready;
-                            _sequenceNumber++;
-                            Trace(context, $"Exit (finished queue)");
-                        }
-                        else
-                        {
-                            // Pop current operation and advance to next
-                            nextOp = _tail.Next = op.Next;
-                            _isNextOperationSynchronous = nextOp.Event != null;
-                        }
-                    }
-                }
-
-                nextOp?.Dispatch();
+                HandleProcessQueuedOperationSuccess(op);
 
                 return (wasCompleted ? OperationResult.Completed : OperationResult.Cancelled);
             }
