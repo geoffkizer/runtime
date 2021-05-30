@@ -306,11 +306,8 @@ namespace System.Net.Sockets
             // Called when op is not in the queue yet, so can't be otherwise executing
             public void DoAbort()
             {
-                Abort();
                 ErrorCode = SocketError.OperationAborted;
             }
-
-            protected abstract void Abort();
 
             protected abstract bool DoTryComplete(SocketAsyncContext context);
 
@@ -353,8 +350,6 @@ namespace System.Net.Sockets
             public int Count;
 
             public SendOperation(SocketAsyncContext context) : base(context) { }
-
-            protected sealed override void Abort() { }
 
             public Action<int, byte[]?, int, SocketFlags, SocketError>? Callback { get; set; }
 
@@ -441,8 +436,6 @@ namespace System.Net.Sockets
             public int BytesTransferred;
 
             public ReceiveOperation(SocketAsyncContext context) : base(context) { }
-
-            protected sealed override void Abort() { }
 
             public Action<int, byte[]?, int, SocketFlags, SocketError>? Callback { get; set; }
 
@@ -554,8 +547,6 @@ namespace System.Net.Sockets
 
             public ReceiveMessageFromOperation(SocketAsyncContext context) : base(context) { }
 
-            protected sealed override void Abort() { }
-
             public Action<int, byte[], int, SocketFlags, IPPacketInformation, SocketError>? Callback { get; set; }
 
             protected override bool DoTryComplete(SocketAsyncContext context) =>
@@ -579,8 +570,6 @@ namespace System.Net.Sockets
 
             public BufferPtrReceiveMessageFromOperation(SocketAsyncContext context) : base(context) { }
 
-            protected sealed override void Abort() { }
-
             public Action<int, byte[], int, SocketFlags, IPPacketInformation, SocketError>? Callback { get; set; }
 
             protected override bool DoTryComplete(SocketAsyncContext context) =>
@@ -597,9 +586,6 @@ namespace System.Net.Sockets
             public AcceptOperation(SocketAsyncContext context) : base(context) { }
 
             public Action<IntPtr, byte[], int, SocketError>? Callback { get; set; }
-
-            protected override void Abort() =>
-                AcceptedFileDescriptor = (IntPtr)(-1);
 
             protected override bool DoTryComplete(SocketAsyncContext context)
             {
@@ -631,8 +617,6 @@ namespace System.Net.Sockets
 
             public Action<SocketError>? Callback { get; set; }
 
-            protected override void Abort() { }
-
             protected override bool DoTryComplete(SocketAsyncContext context)
             {
                 bool result = SocketPal.TryCompleteConnect(context._socket, SocketAddressLen, out ErrorCode);
@@ -652,8 +636,6 @@ namespace System.Net.Sockets
             public long BytesTransferred;
 
             public SendFileOperation(SocketAsyncContext context) : base(context) { }
-
-            protected override void Abort() { }
 
             public Action<long, SocketError>? Callback { get; set; }
 
