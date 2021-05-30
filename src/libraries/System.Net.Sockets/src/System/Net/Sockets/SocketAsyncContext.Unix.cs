@@ -694,6 +694,13 @@ namespace System.Net.Sockets
             }
         }
 
+        public enum OperationResult
+        {
+            Pending = 0,
+            Completed = 1,
+            Cancelled = 2
+        }
+
         private struct OperationQueue<TOperation>
             where TOperation : AsyncOperation
         {
@@ -979,13 +986,6 @@ namespace System.Net.Sockets
                 }
             }
 
-            public enum OperationResult
-            {
-                Pending = 0,
-                Completed = 1,
-                Cancelled = 2
-            }
-
             public OperationResult ShouldProcessQueuedOperation(TOperation op, out int observedSequenceNumber)
             {
                 SocketAsyncContext context = op.AssociatedContext;
@@ -1122,8 +1122,6 @@ namespace System.Net.Sockets
                 {
                     return result;
                 }
-
-                SocketAsyncContext context = op.AssociatedContext;
 
                 while (true)
                 {
@@ -1410,9 +1408,9 @@ namespace System.Net.Sockets
                     e.Reset();
 
                     // We've been signalled to try to process the operation.
-                    OperationQueue<TOperation>.OperationResult result = queue.ProcessQueuedOperation(operation);
-                    if (result == OperationQueue<TOperation>.OperationResult.Completed ||
-                        result == OperationQueue<TOperation>.OperationResult.Cancelled)
+                    OperationResult result = queue.ProcessQueuedOperation(operation);
+                    if (result == OperationResult.Completed ||
+                        result == OperationResult.Cancelled)
                     {
                         break;
                     }
