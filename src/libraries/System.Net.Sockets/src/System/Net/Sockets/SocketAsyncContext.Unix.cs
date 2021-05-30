@@ -986,8 +986,6 @@ namespace System.Net.Sockets
                 Cancelled = 2
             }
 
-            // NOTE: FOr now I'm using Completed here in a bit of a weird way, to indicate either actually completed, or should attempt to complete... clean this up.
-
             public OperationResult ShouldProcessQueuedOperation(TOperation op, out int observedSequenceNumber)
             {
                 SocketAsyncContext context = op.AssociatedContext;
@@ -1036,6 +1034,8 @@ namespace System.Net.Sockets
                 op.SetWaiting();
                 return OperationResult.Pending;
             }
+
+            // NOTE: FOr now I'm using Completed here in a bit of a weird way, to indicate retry is needed; clean this up later....
 
 
             public OperationResult HandleProcessQueuedOperationFailure(TOperation op, ref int observedSequenceNumber)
@@ -1387,21 +1387,23 @@ namespace System.Net.Sockets
             {
                 operation.Event = e;
 
+                // TODO: Also need to promote here. Grrrr.
+
                 if (!queue.StartAsyncOperation(this, operation, observedSequenceNumber))
                 {
                     // Completed synchronously
                     return;
                 }
 
-                bool timeoutExpired = false;
                 while (true)
                 {
                     DateTime waitStart = DateTime.UtcNow;
 
                     if (!e.Wait(timeout))
                     {
-                        timeoutExpired = true;
-                        break;
+                        queue.CancelAndContinueProcessing(operation);
+                        operation.ErrorCode = SocketError.TimedOut;
+                        return;
                     }
 
                     // Reset the event now to avoid lost notifications if the processing is unsuccessful.
@@ -1420,19 +1422,8 @@ namespace System.Net.Sockets
                     if (timeout > 0)
                     {
                         timeout -= (DateTime.UtcNow - waitStart).Milliseconds;
-
-                        if (timeout <= 0)
-                        {
-                            timeoutExpired = true;
-                            break;
-                        }
+                        timeout = Math.Max(timeout, 0);
                     }
-                }
-
-                if (timeoutExpired)
-                {
-                    queue.CancelAndContinueProcessing(operation);
-                    operation.ErrorCode = SocketError.TimedOut;
                 }
             }
         }
