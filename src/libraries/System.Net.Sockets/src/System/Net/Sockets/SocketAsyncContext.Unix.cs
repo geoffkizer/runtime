@@ -986,7 +986,8 @@ namespace System.Net.Sockets
                 }
             }
 
-            public OperationResult ShouldProcessQueuedOperation(TOperation op, out int observedSequenceNumber)
+            // Return true to proceed, false if cancelled.
+            public bool ShouldProcessQueuedOperation(TOperation op, out int observedSequenceNumber)
             {
                 SocketAsyncContext context = op.AssociatedContext;
 
@@ -999,7 +1000,7 @@ namespace System.Net.Sockets
                         Debug.Assert(_tail == null);
                         Trace(context, $"Exit (stopped)");
                         observedSequenceNumber = default;
-                        return OperationResult.Cancelled;
+                        return false;
                     }
                     else
                     {
@@ -1007,7 +1008,7 @@ namespace System.Net.Sockets
                         Debug.Assert(_tail != null, "Unexpected empty queue while processing I/O");
                         Debug.Assert(op == _tail.Next, "Operation is not at head of queue???");
                         observedSequenceNumber = _sequenceNumber;
-                        return OperationResult.Pending;
+                        return true;
                     }
                 }
             }
@@ -1035,9 +1036,7 @@ namespace System.Net.Sockets
                 return OperationResult.Pending;
             }
 
-            // NOTE: FOr now I'm using Completed here in a bit of a weird way, to indicate retry is needed; clean this up later....
-
-
+            // Return true if retry needed, false if not.
             public OperationResult HandleProcessQueuedOperationFailure(TOperation op, ref int observedSequenceNumber)
             {
                 SocketAsyncContext context = op.AssociatedContext;
@@ -1117,12 +1116,12 @@ namespace System.Net.Sockets
 
             public OperationResult ProcessQueuedOperation(TOperation op)
             {
-                OperationResult result = ShouldProcessQueuedOperation(op, out int observedSequenceNumber);
-                if (result != OperationResult.Pending)
+                if (!ShouldProcessQueuedOperation(op, out int observedSequenceNumber))
                 {
-                    return result;
+                    return OperationResult.Cancelled;
                 }
 
+                OperationResult result;
                 while (true)
                 {
                     // Try to perform the IO
