@@ -1009,11 +1009,34 @@ namespace System.Net.Sockets
                         Debug.Assert(_tail != null, "Unexpected empty queue while processing I/O");
                         Debug.Assert(op == _tail.Next, "Operation is not at head of queue???");
                         observedSequenceNumber = _sequenceNumber;
+                        return OperationResult.Pending;
                     }
                 }
-
-                return OperationResult.Completed;
             }
+
+            public OperationResult InvokeQueuedOperation(TOperation op)
+            {
+                SocketAsyncContext context = op.AssociatedContext;
+
+                // Try to change the op state to Running.
+                // If this fails, it means the operation was previously cancelled,
+                // and we should just remove it from the queue without further processing.
+                if (!op.TrySetRunning())
+                {
+                    return OperationResult.Cancelled;
+                }
+
+                // Try to perform the IO
+                if (op.TryComplete(context))
+                {
+                    op.SetComplete();
+                    return OperationResult.Completed;
+                }
+
+                op.SetWaiting();
+                return OperationResult.Pending;
+            }
+
 
             public OperationResult HandleProcessQueuedOperationFailure(TOperation op, ref int observedSequenceNumber)
             {
@@ -1039,7 +1062,7 @@ namespace System.Net.Sockets
                             // So, we need to retry the operation.
                             Debug.Assert(observedSequenceNumber - _sequenceNumber < 10000, "Very large sequence number increase???");
                             observedSequenceNumber = _sequenceNumber;
-                            return OperationResult.Completed;
+                            return OperationResult.Completed;  // TODO: this is abuse, lol
                         }
                         else
                         {
@@ -1095,37 +1118,25 @@ namespace System.Net.Sockets
             public OperationResult ProcessQueuedOperation(TOperation op)
             {
                 OperationResult result = ShouldProcessQueuedOperation(op, out int observedSequenceNumber);
-                if (result != OperationResult.Completed)
+                if (result != OperationResult.Pending)
                 {
                     return result;
                 }
 
                 SocketAsyncContext context = op.AssociatedContext;
 
-                bool wasCompleted = false;
                 while (true)
                 {
-                    // Try to change the op state to Running.
-                    // If this fails, it means the operation was previously cancelled,
-                    // and we should just remove it from the queue without further processing.
-                    if (!op.TrySetRunning())
-                    {
-                        break;
-                    }
-
                     // Try to perform the IO
-                    if (op.TryComplete(context))
+                    result = InvokeQueuedOperation(op);
+                    if (result != OperationResult.Pending)
                     {
-                        op.SetComplete();
-                        wasCompleted = true;
                         break;
                     }
-
-                    op.SetWaiting();
 
                     // Check for retry and reset queue state.
                     result = HandleProcessQueuedOperationFailure(op, ref observedSequenceNumber);
-                    if (result != OperationResult.Completed)
+                    if (result != OperationResult.Completed)    // indicates we need to retry
                     {
                         return result;
                     }
@@ -1134,7 +1145,7 @@ namespace System.Net.Sockets
                 // Remove the op from the queue and see if there's more to process.
                 HandleProcessQueuedOperationSuccess(op);
 
-                return (wasCompleted ? OperationResult.Completed : OperationResult.Cancelled);
+                return result;
             }
 
             public void CancelAndContinueProcessing(TOperation op)
