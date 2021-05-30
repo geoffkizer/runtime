@@ -1036,6 +1036,7 @@ namespace System.Net.Sockets
                 return OperationResult.Pending;
             }
 
+            // TODO: No, it doesm't. Kinda wish it did, but it doesn't.
             // Return true if retry needed, false if not.
             public OperationResult HandleProcessQueuedOperationFailure(TOperation op, ref int observedSequenceNumber)
             {
@@ -1121,14 +1122,16 @@ namespace System.Net.Sockets
                     return OperationResult.Cancelled;
                 }
 
-                OperationResult result;
                 while (true)
                 {
                     // Try to perform the IO
-                    result = InvokeQueuedOperation(op);
+                    OperationResult result = InvokeQueuedOperation(op);
                     if (result != OperationResult.Pending)
                     {
-                        break;
+                        // Remove the op from the queue and see if there's more to process.
+                        HandleProcessQueuedOperationSuccess(op);
+
+                        return result;
                     }
 
                     // Check for retry and reset queue state.
@@ -1138,11 +1141,6 @@ namespace System.Net.Sockets
                         return result;
                     }
                 }
-
-                // Remove the op from the queue and see if there's more to process.
-                HandleProcessQueuedOperationSuccess(op);
-
-                return result;
             }
 
             public void CancelAndContinueProcessing(TOperation op)
