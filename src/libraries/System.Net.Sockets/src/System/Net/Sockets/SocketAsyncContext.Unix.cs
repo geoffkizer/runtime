@@ -789,15 +789,45 @@ namespace System.Net.Sockets
                 return isReady;
             }
 
+            public bool EnsureRegistered(SocketAsyncContext context, TOperation operation)
+            {
+                if (!context.IsRegistered && !context.TryRegister(out Interop.Error error))
+                {
+                    Debug.Assert(error != Interop.Error.SUCCESS);
+
+                    // TODO: Can't we just return true here since we don't care?
+
+                    // macOS: kevent returns EPIPE when adding pipe fd for which the other end is closed.
+                    if (error == Interop.Error.EPIPE)
+                    {
+                        // Because the other end close, we expect the operation to complete when we retry it.
+                        // If it doesn't, we fall through and throw an Exception.
+                        if (operation.TryComplete(context))
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (error == Interop.Error.ENOMEM || error == Interop.Error.ENOSPC)
+                    {
+                        throw new OutOfMemoryException();
+                    }
+                    else
+                    {
+                        throw new InternalException(error);
+                    }
+                }
+
+                return true;
+            }
+
             // Return true for pending, false for completed synchronously (including failure and abort)
             public bool StartAsyncOperation(SocketAsyncContext context, TOperation operation, int observedSequenceNumber, CancellationToken cancellationToken = default)
             {
                 Trace(context, $"Enter");
 
-                if (!context.IsRegistered && !context.TryRegister(out Interop.Error error))
+                if (!EnsureRegistered(context, operation))
                 {
-                    HandleFailedRegistration(context, operation, error);
-
                     Trace(context, "Leave, not registered");
                     return false;
                 }
@@ -875,31 +905,6 @@ namespace System.Net.Sockets
                     {
                         Trace(context, $"Leave, retry succeeded");
                         return false;
-                    }
-                }
-
-                static void HandleFailedRegistration(SocketAsyncContext context, TOperation operation, Interop.Error error)
-                {
-                    Debug.Assert(error != Interop.Error.SUCCESS);
-
-                    // macOS: kevent returns EPIPE when adding pipe fd for which the other end is closed.
-                    if (error == Interop.Error.EPIPE)
-                    {
-                        // Because the other end close, we expect the operation to complete when we retry it.
-                        // If it doesn't, we fall through and throw an Exception.
-                        if (operation.TryComplete(context))
-                        {
-                            return;
-                        }
-                    }
-
-                    if (error == Interop.Error.ENOMEM || error == Interop.Error.ENOSPC)
-                    {
-                        throw new OutOfMemoryException();
-                    }
-                    else
-                    {
-                        throw new InternalException(error);
                     }
                 }
             }
