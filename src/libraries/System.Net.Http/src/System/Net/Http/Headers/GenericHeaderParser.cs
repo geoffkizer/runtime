@@ -6,6 +6,8 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
+    internal delegate int GetParsedValueLengthDelegate<T>(string value, int startIndex, out T? parsedValue);
+
     internal static class GenericHeaderParser
     {
         internal static readonly GenericSingleValueHeaderParser<string> HostParser = new(ParseHost, StringComparer.OrdinalIgnoreCase);
@@ -117,9 +119,7 @@ namespace System.Net.Http.Headers
     // GOAL: Kill this entirely
     internal sealed class GenericHeaderParser<T> : BaseHeaderParser<T>
     {
-        internal delegate int GetParsedValueLengthDelegate(string value, int startIndex, out T? parsedValue);
-
-        private readonly GetParsedValueLengthDelegate _getParsedValueLength;
+        private readonly GetParsedValueLengthDelegate<T> _getParsedValueLength;
         private readonly IEqualityComparer? _comparer;
 
         public override IEqualityComparer? Comparer
@@ -127,12 +127,12 @@ namespace System.Net.Http.Headers
             get { return _comparer; }
         }
 
-        internal GenericHeaderParser(bool supportsMultipleValues, GetParsedValueLengthDelegate getParsedValueLength)
+        internal GenericHeaderParser(bool supportsMultipleValues, GetParsedValueLengthDelegate<T> getParsedValueLength)
             : this(supportsMultipleValues, getParsedValueLength, null)
         {
         }
 
-        internal GenericHeaderParser(bool supportsMultipleValues, GetParsedValueLengthDelegate getParsedValueLength,
+        internal GenericHeaderParser(bool supportsMultipleValues, GetParsedValueLengthDelegate<T> getParsedValueLength,
             IEqualityComparer? comparer)
             : base(supportsMultipleValues)
         {
@@ -151,19 +151,17 @@ namespace System.Net.Http.Headers
 
     internal sealed class GenericSingleValueHeaderParser<T> : BaseSingleValueHeaderParser<T>
     {
-        internal delegate int GetParsedValueLengthDelegate(string value, int startIndex, out T? parsedValue);
-
-        private readonly GetParsedValueLengthDelegate _getParsedValueLength;
+        private readonly GetParsedValueLengthDelegate<T> _getParsedValueLength;
         private readonly IEqualityComparer? _comparer;
 
         public override IEqualityComparer? Comparer => _comparer;
 
-        internal GenericSingleValueHeaderParser(GetParsedValueLengthDelegate getParsedValueLength)
+        internal GenericSingleValueHeaderParser(GetParsedValueLengthDelegate<T> getParsedValueLength)
             : this(getParsedValueLength, null)
         {
         }
 
-        internal GenericSingleValueHeaderParser(GetParsedValueLengthDelegate getParsedValueLength, IEqualityComparer? comparer)
+        internal GenericSingleValueHeaderParser(GetParsedValueLengthDelegate<T> getParsedValueLength, IEqualityComparer? comparer)
         {
             _getParsedValueLength = getParsedValueLength;
             _comparer = comparer;
