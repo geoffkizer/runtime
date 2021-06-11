@@ -16,13 +16,11 @@ namespace System.Net.Http.Tests
         [Fact]
         public void Properties_ReadValues_MatchExpectation()
         {
-            ProductInfoHeaderParser parser = ProductInfoHeaderParser.SingleValueParser;
-            Assert.False(parser.SupportsMultipleValues, "SupportsMultipleValues");
-            Assert.Null(parser.Comparer);
+            Assert.False(ProductInfoHeaderParser.SingleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
+            Assert.Null(ProductInfoHeaderParser.SingleValueParser.Comparer);
 
-            parser = ProductInfoHeaderParser.MultipleValueParser;
-            Assert.True(parser.SupportsMultipleValues, "SupportsMultipleValues");
-            Assert.Null(parser.Comparer);
+            Assert.True(ProductInfoHeaderParser.SingleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
+            Assert.Null(ProductInfoHeaderParser.SingleValueParser.Comparer);
         }
 
         [Fact]
@@ -73,7 +71,7 @@ namespace System.Net.Http.Tests
         private void CheckValidParsedValue(string input, int startIndex, ProductInfoHeaderValue expectedResult,
             int expectedIndex)
         {
-            ProductInfoHeaderParser parser = ProductInfoHeaderParser.MultipleValueParser;
+            var parser = ProductInfoHeaderParser.MultipleValueParser;
             object result = null;
             Assert.True(parser.TryParseValue(input, null, ref startIndex, out result),
                 string.Format("TryParse returned false. Input: '{0}'", input));
@@ -83,7 +81,7 @@ namespace System.Net.Http.Tests
 
         private void CheckInvalidParsedValue(string input, int startIndex)
         {
-            ProductInfoHeaderParser parser = ProductInfoHeaderParser.MultipleValueParser;
+            var parser = ProductInfoHeaderParser.MultipleValueParser;
             object result = null;
             int newIndex = startIndex;
             Assert.False(parser.TryParseValue(input, null, ref newIndex, out result),

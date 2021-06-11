@@ -1,27 +1,16 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
 using System.Diagnostics.CodeAnalysis;
 
 namespace System.Net.Http.Headers
 {
-    // Don't derive from BaseHeaderParser since empty values are not supported. After a ' ' separator a valid value
-    // must follow. Also leading separators are not allowed.
-    internal sealed class ProductInfoHeaderParser : HttpHeaderParser<ProductInfoHeaderValue>
+    internal static class ProductInfoHeaderParser
     {
-        // Unlike most other headers, User-Agent and Server use whitespace as separators
-        private const string separator = " ";
+        internal static readonly SingleValueProductInfoHeaderParser SingleValueParser = new();
+        internal static readonly MulitpleValueProductInfoHeaderParser MultipleValueParser = new();
 
-        internal static readonly ProductInfoHeaderParser SingleValueParser = new ProductInfoHeaderParser(false);
-        internal static readonly ProductInfoHeaderParser MultipleValueParser = new ProductInfoHeaderParser(true);
-
-        private ProductInfoHeaderParser(bool supportsMultipleValues)
-            : base(supportsMultipleValues, separator)
-        {
-        }
-
-        public override bool TryParseValue([NotNullWhen(true)] string? value, object? storeValue, ref int index, [NotNullWhen(true)] out ProductInfoHeaderValue? parsedValue)
+        public static bool TryParseValue([NotNullWhen(true)] string? value, ref int index, [NotNullWhen(true)] out ProductInfoHeaderValue? parsedValue)
         {
             parsedValue = null;
 
@@ -67,5 +56,33 @@ namespace System.Net.Http.Headers
             parsedValue = result!;
             return true;
         }
+    }
+
+    // Don't derive from BaseHeaderParser since empty values are not supported. After a ' ' separator a valid value
+    // must follow. Also leading separators are not allowed.
+    internal sealed class SingleValueProductInfoHeaderParser : SingleValueHeaderParser<ProductInfoHeaderValue>
+    {
+        internal SingleValueProductInfoHeaderParser()
+        {
+        }
+
+        public override bool TryParseValue([NotNullWhen(true)] string? value, object? storeValue, ref int index, [NotNullWhen(true)] out ProductInfoHeaderValue? parsedValue) =>
+            ProductInfoHeaderParser.TryParseValue(value, ref index, out parsedValue);
+    }
+
+    // Don't derive from BaseHeaderParser since empty values are not supported. After a ' ' separator a valid value
+    // must follow. Also leading separators are not allowed.
+    internal sealed class MulitpleValueProductInfoHeaderParser : MultipleValueHeaderParser<ProductInfoHeaderValue>
+    {
+        // Unlike most other headers, User-Agent and Server use whitespace as separators
+        private const string separator = " ";
+
+        internal MulitpleValueProductInfoHeaderParser()
+            : base(separator)
+        {
+        }
+
+        public override bool TryParseValue([NotNullWhen(true)] string? value, object? storeValue, ref int index, [NotNullWhen(true)] out ProductInfoHeaderValue? parsedValue) =>
+            ProductInfoHeaderParser.TryParseValue(value, ref index, out parsedValue);
     }
 }
