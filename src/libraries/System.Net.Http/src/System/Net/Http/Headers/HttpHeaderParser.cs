@@ -87,20 +87,15 @@ namespace System.Net.Http.Headers
         }
     }
 
-    // CONSIDER:
-    // IEqualityComparer<T> for Comparer?
-    // Typed ToString?
-
     internal abstract class HttpHeaderParser<T> : HttpHeaderParser
     {
         protected HttpHeaderParser(bool supportsMultipleValues) :
             base(supportsMultipleValues)
         { }
+
         protected HttpHeaderParser(bool supportsMultipleValues, string separator) :
             base(supportsMultipleValues, separator)
         { }
-
-        // TODO: What is storeValue for, again??
 
         public sealed override bool TryParseValue(string? value, object? storeValue, ref int index, [NotNullWhen(true)] out object? parsedValue)
         {
@@ -129,18 +124,5 @@ namespace System.Net.Http.Headers
             }
             return result;
         }
-
-#if false
-        // If ValueType is a custom header value type (e.g. NameValueHeaderValue) it already implements ToString() correctly.
-        // However for existing types like int, byte[], DateTimeOffset we can't override ToString(). Therefore the
-        // parser provides a ToString() virtual method that can be overridden by derived types to correctly serialize
-        // values (e.g. byte[] to Base64 encoded string).
-        public virtual string? ToString(object value)
-        {
-            Debug.Assert(value != null);
-
-            return value.ToString();
-        }
-#endif
     }
 }
