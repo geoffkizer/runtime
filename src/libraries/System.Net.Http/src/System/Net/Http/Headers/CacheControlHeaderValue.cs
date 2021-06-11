@@ -25,7 +25,6 @@ namespace System.Net.Http.Headers
         private const string publicString = "public";
         private const string sharedMaxAgeString = "s-maxage";
 
-        private static readonly HttpHeaderParser s_nameValueListParser = GenericHeaderParser.MultipleValueNameValueParser;
         private static readonly Action<string> s_checkIsValidToken = CheckIsValidToken;
 
         private bool _noCache;
