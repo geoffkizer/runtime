@@ -8,7 +8,7 @@ namespace System.Net.Http.Headers
 {
     // Don't derive from BaseHeaderParser since parsing the Base64 string is delegated to Convert.FromBase64String()
     // which will remove leading, trailing, and whitespace in the middle of the string.
-    internal sealed class ByteArrayHeaderParser : HttpHeaderParser
+    internal sealed class ByteArrayHeaderParser : HttpHeaderParser<byte[]>
     {
         internal static readonly ByteArrayHeaderParser Parser = new ByteArrayHeaderParser();
 
@@ -24,7 +24,7 @@ namespace System.Net.Http.Headers
             return Convert.ToBase64String((byte[])value);
         }
 
-        public override bool TryParseValue([NotNullWhen(true)] string? value, object? storeValue, ref int index, [NotNullWhen(true)] out object? parsedValue)
+        public override bool TryParseValue([NotNullWhen(true)] string? value, object? storeValue, ref int index, [NotNullWhen(true)] out byte[]? parsedValue)
         {
             parsedValue = null;
 

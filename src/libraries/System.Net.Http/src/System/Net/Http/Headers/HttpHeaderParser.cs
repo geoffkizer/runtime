@@ -86,4 +86,61 @@ namespace System.Net.Http.Headers
             return value.ToString();
         }
     }
+
+    // CONSIDER:
+    // IEqualityComparer<T> for Comparer?
+    // Typed ToString?
+
+    internal abstract class HttpHeaderParser<T> : HttpHeaderParser
+    {
+        protected HttpHeaderParser(bool supportsMultipleValues) :
+            base(supportsMultipleValues)
+        { }
+        protected HttpHeaderParser(bool supportsMultipleValues, string separator) :
+            base(supportsMultipleValues, separator)
+        { }
+
+        // TODO: What is storeValue for, again??
+
+        public sealed override bool TryParseValue(string? value, object? storeValue, ref int index, [NotNullWhen(true)] out object? parsedValue)
+        {
+            bool success = TryParseValue(value, storeValue, ref index, out T? typedParsedValue);
+            parsedValue = typedParsedValue;
+            return success;
+        }
+
+        public abstract bool TryParseValue(string? value, object? storeValue, ref int index, [NotNullWhen(true)] out T? parsedValue);
+
+        // TODO: If the non generic goes away completely, then we could rename back to just TypedParseValue
+        // TODO: What would use this, currently?
+
+        public T TypedParseValue(string? value, object? storeValue, ref int index)
+        {
+            // Index may be value.Length (e.g. both 0). This may be allowed for some headers (e.g. Accept but not
+            // allowed by others (e.g. Content-Length). The parser has to decide if this is valid or not.
+            Debug.Assert((value == null) || ((index >= 0) && (index <= value.Length)));
+
+            // If a parser returns 'null', it means there was no value, but that's valid (e.g. "Accept: "). The caller
+            // can ignore the value.
+            if (!TryParseValue(value, storeValue, ref index, out T? result))
+            {
+                throw new FormatException(SR.Format(System.Globalization.CultureInfo.InvariantCulture, SR.net_http_headers_invalid_value,
+                    value == null ? "<null>" : value.Substring(index)));
+            }
+            return result;
+        }
+
+#if false
+        // If ValueType is a custom header value type (e.g. NameValueHeaderValue) it already implements ToString() correctly.
+        // However for existing types like int, byte[], DateTimeOffset we can't override ToString(). Therefore the
+        // parser provides a ToString() virtual method that can be overridden by derived types to correctly serialize
+        // values (e.g. byte[] to Base64 encoded string).
+        public virtual string? ToString(object value)
+        {
+            Debug.Assert(value != null);
+
+            return value.ToString();
+        }
+#endif
+    }
 }
