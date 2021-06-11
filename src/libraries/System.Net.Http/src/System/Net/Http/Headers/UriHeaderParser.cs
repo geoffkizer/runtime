@@ -9,7 +9,7 @@ namespace System.Net.Http.Headers
 {
     // Don't derive from BaseHeaderParser since parsing is delegated to Uri.TryCreate()
     // which will remove leading and trailing whitespace.
-    internal sealed class UriHeaderParser : HttpHeaderParser<Uri>
+    internal sealed class UriHeaderParser : SingleValueHeaderParser<Uri>
     {
         private readonly UriKind _uriKind;
 
@@ -17,7 +17,6 @@ namespace System.Net.Http.Headers
             new UriHeaderParser(UriKind.RelativeOrAbsolute);
 
         private UriHeaderParser(UriKind uriKind)
-            : base(false)
         {
             _uriKind = uriKind;
         }

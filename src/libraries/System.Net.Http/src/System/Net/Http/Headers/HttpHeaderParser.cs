@@ -122,4 +122,22 @@ namespace System.Net.Http.Headers
             return result;
         }
     }
+
+    internal abstract class SingleValueHeaderParser<T> : HttpHeaderParser<T>
+    {
+        protected SingleValueHeaderParser() :
+            base(supportsMultipleValues: false)
+        { }
+    }
+
+    internal abstract class MultipleValueHeaderParser<T> : HttpHeaderParser<T>
+    {
+        protected MultipleValueHeaderParser() :
+            base(supportsMultipleValues: true)
+        { }
+
+        protected MultipleValueHeaderParser(string separator) :
+            base(supportsMultipleValues: true, separator: separator)
+        { }
+    }
 }

@@ -8,12 +8,11 @@ namespace System.Net.Http.Headers
 {
     // Don't derive from BaseHeaderParser since parsing is delegated to DateTimeOffset.TryParseExact()
     // which will remove leading, trailing, and whitespace in the middle of the string.
-    internal sealed class DateHeaderParser : HttpHeaderParser<DateTimeOffset?>
+    internal sealed class DateHeaderParser : SingleValueHeaderParser<DateTimeOffset?>
     {
         internal static readonly DateHeaderParser Parser = new DateHeaderParser();
 
         private DateHeaderParser()
-            : base(false)
         {
         }
 
