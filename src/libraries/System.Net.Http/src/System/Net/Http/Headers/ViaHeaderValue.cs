@@ -137,7 +137,7 @@ namespace System.Net.Http.Headers
         public static ViaHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.SingleValueViaParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueViaParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out ViaHeaderValue? parsedValue)

@@ -135,7 +135,7 @@ namespace System.Net.Http.Headers
         public static WarningHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.SingleValueWarningParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueWarningParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out WarningHeaderValue? parsedValue)

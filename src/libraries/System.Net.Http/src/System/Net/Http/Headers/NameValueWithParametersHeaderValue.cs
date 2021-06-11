@@ -74,7 +74,7 @@ namespace System.Net.Http.Headers
         public static new NameValueWithParametersHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.SingleValueNameValueWithParametersParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueNameValueWithParametersParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out NameValueWithParametersHeaderValue? parsedValue)

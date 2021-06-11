@@ -106,10 +106,7 @@ namespace System.Net.Http.Headers
 
         public abstract bool TryParseValue(string? value, object? storeValue, ref int index, [NotNullWhen(true)] out T? parsedValue);
 
-        // TODO: If the non generic goes away completely, then we could rename back to just TypedParseValue
-        // TODO: What would use this, currently?
-
-        public T TypedParseValue(string? value, object? storeValue, ref int index)
+        public new T ParseValue(string? value, object? storeValue, ref int index)
         {
             // Index may be value.Length (e.g. both 0). This may be allowed for some headers (e.g. Accept but not
             // allowed by others (e.g. Content-Length). The parser has to decide if this is valid or not.

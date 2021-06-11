@@ -183,7 +183,7 @@ namespace System.Net.Http.Headers
         public static ContentRangeHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.ContentRangeParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.ContentRangeParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out ContentRangeHeaderValue? parsedValue)

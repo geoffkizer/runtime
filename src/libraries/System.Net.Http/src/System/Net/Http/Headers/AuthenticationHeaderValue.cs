@@ -95,7 +95,7 @@ namespace System.Net.Http.Headers
         public static AuthenticationHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.SingleValueAuthenticationParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueAuthenticationParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out AuthenticationHeaderValue? parsedValue)

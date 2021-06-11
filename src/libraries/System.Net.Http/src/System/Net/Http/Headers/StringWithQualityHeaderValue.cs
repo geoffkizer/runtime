@@ -102,7 +102,7 @@ namespace System.Net.Http.Headers
         public static StringWithQualityHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.SingleValueStringWithQualityParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueStringWithQualityParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out StringWithQualityHeaderValue? parsedValue)

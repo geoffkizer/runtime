@@ -88,7 +88,7 @@ namespace System.Net.Http.Headers
         public static RetryConditionHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.RetryConditionParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.RetryConditionParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out RetryConditionHeaderValue? parsedValue)

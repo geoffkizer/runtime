@@ -187,7 +187,7 @@ namespace System.Net.Http.Headers
         public static ContentDispositionHeaderValue Parse(string? input)
         {
             int index = 0;
-            return GenericHeaderParser.ContentDispositionParser.TypedParseValue(input, null, ref index);
+            return GenericHeaderParser.ContentDispositionParser.ParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out ContentDispositionHeaderValue? parsedValue)
