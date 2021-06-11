@@ -6,12 +6,11 @@ using System.Globalization;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class TimeSpanHeaderParser : BaseHeaderParser<TimeSpan?>
+    internal sealed class TimeSpanHeaderParser : BaseSingleValueHeaderParser<TimeSpan?>
     {
         internal static readonly TimeSpanHeaderParser Parser = new TimeSpanHeaderParser();
 
         private TimeSpanHeaderParser()
-            : base(false)
         {
         }
 
