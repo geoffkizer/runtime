@@ -108,7 +108,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetRangeConditionLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetRangeConditionLength(string? input, int startIndex, out RangeConditionHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

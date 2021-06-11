@@ -153,7 +153,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetViaLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetViaLength(string? input, int startIndex, out ViaHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

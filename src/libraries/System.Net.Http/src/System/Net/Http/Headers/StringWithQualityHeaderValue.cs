@@ -120,7 +120,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetStringWithQualityLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetStringWithQualityLength(string? input, int startIndex, out StringWithQualityHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

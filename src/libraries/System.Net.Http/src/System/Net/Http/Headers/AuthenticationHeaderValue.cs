@@ -95,24 +95,16 @@ namespace System.Net.Http.Headers
         public static AuthenticationHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (AuthenticationHeaderValue)GenericHeaderParser.SingleValueAuthenticationParser.ParseValue(
-                input, null, ref index);
+            return GenericHeaderParser.SingleValueAuthenticationParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out AuthenticationHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.SingleValueAuthenticationParser.TryParseValue(input, null, ref index, out object? output))
-            {
-                parsedValue = (AuthenticationHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.SingleValueAuthenticationParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
-        internal static int GetAuthenticationLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetAuthenticationLength(string? input, int startIndex, out AuthenticationHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

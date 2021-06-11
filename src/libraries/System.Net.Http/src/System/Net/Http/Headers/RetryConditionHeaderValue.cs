@@ -105,7 +105,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetRetryConditionLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetRetryConditionLength(string? input, int startIndex, out RetryConditionHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

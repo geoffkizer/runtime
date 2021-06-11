@@ -213,16 +213,13 @@ namespace System.Net.Http.Tests
         private static void CallGetRetryConditionLength(string input, int startIndex, int expectedLength,
             out RetryConditionHeaderValue result)
         {
-            object temp = null;
             Assert.Equal(expectedLength, RetryConditionHeaderValue.GetRetryConditionLength(input, startIndex,
-                out temp));
-            result = temp as RetryConditionHeaderValue;
+                out result));
         }
 
         private static void CheckInvalidGetRetryConditionLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, RetryConditionHeaderValue.GetRetryConditionLength(input, startIndex, out result));
+            Assert.Equal(0, RetryConditionHeaderValue.GetRetryConditionLength(input, startIndex, out RetryConditionHeaderValue result));
             Assert.Null(result);
         }
         #endregion

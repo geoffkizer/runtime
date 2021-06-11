@@ -6,7 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace System.Net.Http.Headers
 {
-    internal abstract class BaseHeaderParser : HttpHeaderParser
+    internal abstract class BaseHeaderParser<T> : HttpHeaderParser<T>
     {
         protected BaseHeaderParser(bool supportsMultipleValues)
             : base(supportsMultipleValues)
@@ -22,14 +22,14 @@ namespace System.Net.Http.Headers
         /// <param name="parsedValue">The resulting value parsed.</param>
         /// <returns>If a value could be parsed, the number of characters used to parse that value. Otherwise, 0.</returns>
         protected abstract int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out object? parsedValue);
+            out T? parsedValue);
 
 #pragma warning disable CS8765 // Doesn't match overriden member nullable attribute on out parameter
         public sealed override bool TryParseValue(string? value, object? storeValue, ref int index,
-            out object? parsedValue)
+            out T? parsedValue)
 #pragma warning restore CS8765
         {
-            parsedValue = null;
+            parsedValue = default;
 
             // If multiple values are supported (i.e. list of values), then accept an empty string: The header may
             // be added multiple times to the request/response message. E.g.
@@ -59,7 +59,7 @@ namespace System.Net.Http.Headers
                 return SupportsMultipleValues;
             }
 
-            int length = GetParsedValueLength(value, current, storeValue, out object? result);
+            int length = GetParsedValueLength(value, current, storeValue, out T? result);
 
             if (length == 0)
             {

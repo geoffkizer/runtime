@@ -204,7 +204,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetDispositionTypeLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetDispositionTypeLength(string? input, int startIndex, out ContentDispositionHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 

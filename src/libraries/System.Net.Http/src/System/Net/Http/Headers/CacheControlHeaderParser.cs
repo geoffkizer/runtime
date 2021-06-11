@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class CacheControlHeaderParser : BaseHeaderParser
+    internal sealed class CacheControlHeaderParser : BaseHeaderParser<CacheControlHeaderValue>
     {
         internal static readonly CacheControlHeaderParser Parser = new CacheControlHeaderParser();
 
@@ -20,7 +20,7 @@ namespace System.Net.Http.Headers
         }
 
         protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out object? parsedValue)
+            out CacheControlHeaderValue? parsedValue)
         {
             CacheControlHeaderValue? temp = storeValue as CacheControlHeaderValue;
             Debug.Assert(storeValue == null || temp != null, "'storeValue' is not of type CacheControlHeaderValue");

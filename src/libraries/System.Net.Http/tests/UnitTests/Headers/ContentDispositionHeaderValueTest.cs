@@ -450,37 +450,31 @@ namespace System.Net.Http.Tests
         [Fact]
         public void GetDispositionTypeLength_DifferentValidScenarios_AllReturnNonZero()
         {
-            object result = null;
-            ContentDispositionHeaderValue value = null;
+            ContentDispositionHeaderValue value;
 
             Assert.Equal(7, ContentDispositionHeaderValue.GetDispositionTypeLength("inline , other/name", 0,
-                out result));
-            value = (ContentDispositionHeaderValue)result;
+                out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal(0, value.Parameters.Count);
 
-            Assert.Equal(6, ContentDispositionHeaderValue.GetDispositionTypeLength("inline", 0, out result));
-            value = (ContentDispositionHeaderValue)result;
+            Assert.Equal(6, ContentDispositionHeaderValue.GetDispositionTypeLength("inline", 0, out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal(0, value.Parameters.Count);
 
             Assert.Equal(19, ContentDispositionHeaderValue.GetDispositionTypeLength("inline; name=MyName", 0,
-                out result));
-            value = (ContentDispositionHeaderValue)result;
+                out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal("MyName", value.Name);
             Assert.Equal(1, value.Parameters.Count);
 
             Assert.Equal(32, ContentDispositionHeaderValue.GetDispositionTypeLength(" inline; custom=value;name=myName",
-                1, out result));
-            value = (ContentDispositionHeaderValue)result;
+                1, out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal("myName", value.Name);
             Assert.Equal(2, value.Parameters.Count);
 
             Assert.Equal(14, ContentDispositionHeaderValue.GetDispositionTypeLength(" inline; custom, next",
-                1, out result));
-            value = (ContentDispositionHeaderValue)result;
+                1, out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Null(value.Name);
             Assert.Equal(1, value.Parameters.Count);
@@ -488,8 +482,7 @@ namespace System.Net.Http.Tests
             Assert.Null(value.Parameters.ElementAt(0).Value);
 
             Assert.Equal(40, ContentDispositionHeaderValue.GetDispositionTypeLength(
-                "inline ; custom =\r\n \"x\" ; name = myName , next", 0, out result));
-            value = (ContentDispositionHeaderValue)result;
+                "inline ; custom =\r\n \"x\" ; name = myName , next", 0, out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal("myName", value.Name);
             Assert.Equal(2, value.Parameters.Count);
@@ -499,8 +492,7 @@ namespace System.Net.Http.Tests
             Assert.Equal("myName", value.Parameters.ElementAt(1).Value);
 
             Assert.Equal(29, ContentDispositionHeaderValue.GetDispositionTypeLength(
-                "inline;custom=\"x\";name=myName,next", 0, out result));
-            value = (ContentDispositionHeaderValue)result;
+                "inline;custom=\"x\";name=myName,next", 0, out value));
             Assert.Equal("inline", value.DispositionType);
             Assert.Equal("myName", value.Name);
             Assert.Equal(2, value.Parameters.Count);
@@ -513,7 +505,7 @@ namespace System.Net.Http.Tests
         [Fact]
         public void GetDispositionTypeLength_DifferentInvalidScenarios_AllReturnZero()
         {
-            object result = null;
+            ContentDispositionHeaderValue result;
 
             Assert.Equal(0, ContentDispositionHeaderValue.GetDispositionTypeLength(" inline", 0, out result));
             Assert.Null(result);

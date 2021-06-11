@@ -222,15 +222,12 @@ namespace System.Net.Http.Tests
         private static void CallGetRangeLength(string input, int startIndex, int expectedLength,
             out RangeHeaderValue result)
         {
-            object temp = null;
-            Assert.Equal(expectedLength, RangeHeaderValue.GetRangeLength(input, startIndex, out temp));
-            result = temp as RangeHeaderValue;
+            Assert.Equal(expectedLength, RangeHeaderValue.GetRangeLength(input, startIndex, out result));
         }
 
         private static void CheckInvalidGetRangeLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, RangeHeaderValue.GetRangeLength(input, startIndex, out result));
+            Assert.Equal(0, RangeHeaderValue.GetRangeLength(input, startIndex, out RangeHeaderValue result));
             Assert.Null(result);
         }
         #endregion

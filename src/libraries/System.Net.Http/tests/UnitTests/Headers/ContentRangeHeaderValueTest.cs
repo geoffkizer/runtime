@@ -299,15 +299,12 @@ namespace System.Net.Http.Tests
         private static void CallGetContentRangeLength(string input, int startIndex, int expectedLength,
             out ContentRangeHeaderValue result)
         {
-            object temp = null;
-            Assert.Equal(expectedLength, ContentRangeHeaderValue.GetContentRangeLength(input, startIndex, out temp));
-            result = temp as ContentRangeHeaderValue;
+            Assert.Equal(expectedLength, ContentRangeHeaderValue.GetContentRangeLength(input, startIndex, out result));
         }
 
         private static void CheckInvalidGetContentRangeLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, ContentRangeHeaderValue.GetContentRangeLength(input, startIndex, out result));
+            Assert.Equal(0, ContentRangeHeaderValue.GetContentRangeLength(input, startIndex, out ContentRangeHeaderValue result));
             Assert.Null(result);
         }
         #endregion

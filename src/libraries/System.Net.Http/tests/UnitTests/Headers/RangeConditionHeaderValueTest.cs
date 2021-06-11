@@ -218,16 +218,13 @@ namespace System.Net.Http.Tests
         private static void CallGetRangeConditionLength(string input, int startIndex, int expectedLength,
             out RangeConditionHeaderValue result)
         {
-            object temp = null;
             Assert.Equal(expectedLength, RangeConditionHeaderValue.GetRangeConditionLength(input, startIndex,
-                out temp));
-            result = temp as RangeConditionHeaderValue;
+                out result));
         }
 
         private static void CheckInvalidGetRangeConditionLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, RangeConditionHeaderValue.GetRangeConditionLength(input, startIndex, out result));
+            Assert.Equal(0, RangeConditionHeaderValue.GetRangeConditionLength(input, startIndex, out RangeConditionHeaderValue result));
             Assert.Null(result);
         }
         #endregion

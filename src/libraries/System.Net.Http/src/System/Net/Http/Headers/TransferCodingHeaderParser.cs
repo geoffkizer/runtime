@@ -5,7 +5,8 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class TransferCodingHeaderParser : BaseHeaderParser
+    // TODO: Not right re TransferCodingWithQualityHeaderValue
+    internal sealed class TransferCodingHeaderParser : BaseHeaderParser<TransferCodingHeaderValue>
     {
         private readonly Func<TransferCodingHeaderValue> _transferCodingCreator;
 
@@ -28,7 +29,7 @@ namespace System.Net.Http.Headers
         }
 
         protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out object? parsedValue)
+            out TransferCodingHeaderValue? parsedValue)
         {
             int resultLength = TransferCodingHeaderValue.GetTransferCodingLength(value, startIndex,
                 _transferCodingCreator, out TransferCodingHeaderValue? temp);

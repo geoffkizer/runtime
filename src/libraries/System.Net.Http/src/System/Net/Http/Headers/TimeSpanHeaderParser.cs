@@ -6,7 +6,7 @@ using System.Globalization;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class TimeSpanHeaderParser : BaseHeaderParser
+    internal sealed class TimeSpanHeaderParser : BaseHeaderParser<TimeSpan?>
     {
         internal static readonly TimeSpanHeaderParser Parser = new TimeSpanHeaderParser();
 
@@ -23,7 +23,7 @@ namespace System.Net.Http.Headers
         }
 
         protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out object? parsedValue)
+            out TimeSpan? parsedValue)
         {
             parsedValue = null;
 

@@ -5,7 +5,9 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class MediaTypeHeaderParser : BaseHeaderParser
+    // TODO: Not quite right re MediaTypeWithQualityHeaderValue
+
+    internal sealed class MediaTypeHeaderParser : BaseHeaderParser<MediaTypeHeaderValue>
     {
         private readonly bool _supportsMultipleValues;
         private readonly Func<MediaTypeHeaderValue> _mediaTypeCreator;
@@ -24,7 +26,7 @@ namespace System.Net.Http.Headers
         }
 
         protected override int GetParsedValueLength(string? value, int startIndex, object? storeValue,
-            out object? parsedValue)
+            out MediaTypeHeaderValue? parsedValue)
         {
             int resultLength = MediaTypeHeaderValue.GetMediaTypeLength(value, startIndex, _mediaTypeCreator, out MediaTypeHeaderValue? temp);
 

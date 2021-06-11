@@ -6,7 +6,7 @@ using System.Globalization;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class Int64NumberHeaderParser : BaseHeaderParser
+    internal sealed class Int64NumberHeaderParser : BaseHeaderParser<long?>
     {
         // Note that we don't need a custom comparer even though we have a value type that gets boxed (comparing two
         // equal boxed value types returns 'false' since the object instances used for boxing the two values are
@@ -29,7 +29,7 @@ namespace System.Net.Http.Headers
         }
 
         protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out object? parsedValue)
+            out long? parsedValue)
         {
             parsedValue = null;
 

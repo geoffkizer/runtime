@@ -274,16 +274,13 @@ namespace System.Net.Http.Tests
         private static void CallGetStringWithQualityLength(string input, int startIndex, int expectedLength,
             out StringWithQualityHeaderValue result)
         {
-            object temp = null;
             Assert.Equal(expectedLength, StringWithQualityHeaderValue.GetStringWithQualityLength(input,
-                startIndex, out temp));
-            result = temp as StringWithQualityHeaderValue;
+                startIndex, out result));
         }
 
         private static void CheckInvalidGetStringWithQualityLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, StringWithQualityHeaderValue.GetStringWithQualityLength(input, startIndex, out result));
+            Assert.Equal(0, StringWithQualityHeaderValue.GetStringWithQualityLength(input, startIndex, out StringWithQualityHeaderValue result));
             Assert.Null(result);
         }
         #endregion

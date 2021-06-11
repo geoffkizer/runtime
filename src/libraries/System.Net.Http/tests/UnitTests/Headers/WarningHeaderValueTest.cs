@@ -304,15 +304,13 @@ namespace System.Net.Http.Tests
         private static void CheckGetWarningLength(string input, int startIndex, int expectedLength,
             WarningHeaderValue expectedResult)
         {
-            object result = null;
-            Assert.Equal(expectedLength, WarningHeaderValue.GetWarningLength(input, startIndex, out result));
+            Assert.Equal(expectedLength, WarningHeaderValue.GetWarningLength(input, startIndex, out WarningHeaderValue result));
             Assert.Equal(expectedResult, result);
         }
 
         private static void CheckInvalidWarningViaLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, WarningHeaderValue.GetWarningLength(input, startIndex, out result));
+            Assert.Equal(0, WarningHeaderValue.GetWarningLength(input, startIndex, out WarningHeaderValue result));
             Assert.Null(result);
         }
         #endregion

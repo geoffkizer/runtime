@@ -274,17 +274,14 @@ namespace System.Net.Http.Tests
         private static void CallGetNameValueWithParametersLength(string input, int startIndex, int expectedLength,
             out NameValueWithParametersHeaderValue result)
         {
-            object temp = null;
             Assert.Equal(expectedLength, NameValueWithParametersHeaderValue.GetNameValueWithParametersLength(input,
-                startIndex, out temp));
-            result = temp as NameValueWithParametersHeaderValue;
+                startIndex, out result));
         }
 
         private static void CheckInvalidGetNameValueWithParametersLength(string input, int startIndex)
         {
-            object result = null;
             Assert.Equal(0, NameValueWithParametersHeaderValue.GetNameValueWithParametersLength(input, startIndex,
-                out result));
+                out NameValueWithParametersHeaderValue result));
             Assert.Null(result);
         }
         #endregion

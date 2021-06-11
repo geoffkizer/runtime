@@ -92,7 +92,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetNameValueWithParametersLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetNameValueWithParametersLength(string? input, int startIndex, out NameValueWithParametersHeaderValue? parsedValue)
         {
             Debug.Assert(input != null);
             Debug.Assert(startIndex >= 0);

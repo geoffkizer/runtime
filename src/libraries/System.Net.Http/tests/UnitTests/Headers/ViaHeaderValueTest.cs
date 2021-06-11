@@ -325,15 +325,13 @@ namespace System.Net.Http.Tests
         private static void CheckGetViaLength(string input, int startIndex, int expectedLength,
             ViaHeaderValue expectedResult)
         {
-            object result = null;
-            Assert.Equal(expectedLength, ViaHeaderValue.GetViaLength(input, startIndex, out result));
+            Assert.Equal(expectedLength, ViaHeaderValue.GetViaLength(input, startIndex, out ViaHeaderValue result));
             Assert.Equal(expectedResult, result);
         }
 
         private static void CheckInvalidGetViaLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, ViaHeaderValue.GetViaLength(input, startIndex, out result));
+            Assert.Equal(0, ViaHeaderValue.GetViaLength(input, startIndex, out ViaHeaderValue result));
             Assert.Null(result);
         }
         #endregion

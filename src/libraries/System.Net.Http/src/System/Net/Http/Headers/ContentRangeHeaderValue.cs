@@ -199,7 +199,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetContentRangeLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetContentRangeLength(string? input, int startIndex, out ContentRangeHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 
@@ -358,7 +358,7 @@ namespace System.Net.Http.Headers
         }
 
         private static bool TryCreateContentRange(string input, string unit, int fromStartIndex, int fromLength,
-            int toStartIndex, int toLength, int lengthStartIndex, int lengthLength, [NotNullWhen(true)] out object? parsedValue)
+            int toStartIndex, int toLength, int lengthStartIndex, int lengthLength, [NotNullWhen(true)] out ContentRangeHeaderValue? parsedValue)
         {
             parsedValue = null;
 

@@ -234,15 +234,13 @@ namespace System.Net.Http.Tests
         private static void CallGetAuthenticationLength(string input, int startIndex, int expectedLength,
             AuthenticationHeaderValue expectedResult)
         {
-            object result = null;
-            Assert.Equal(expectedLength, AuthenticationHeaderValue.GetAuthenticationLength(input, startIndex, out result));
+            Assert.Equal(expectedLength, AuthenticationHeaderValue.GetAuthenticationLength(input, startIndex, out AuthenticationHeaderValue result));
             Assert.Equal(expectedResult, result);
         }
 
         private static void CheckInvalidGetAuthenticationLength(string input, int startIndex)
         {
-            object result = null;
-            Assert.Equal(0, AuthenticationHeaderValue.GetAuthenticationLength(input, startIndex, out result));
+            Assert.Equal(0, AuthenticationHeaderValue.GetAuthenticationLength(input, startIndex, out AuthenticationHeaderValue result));
             Assert.Null(result);
         }
         #endregion

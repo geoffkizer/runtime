@@ -128,7 +128,7 @@ namespace System.Net.Http.Headers
             return false;
         }
 
-        internal static int GetRangeLength(string? input, int startIndex, out object? parsedValue)
+        internal static int GetRangeLength(string? input, int startIndex, out RangeHeaderValue? parsedValue)
         {
             Debug.Assert(startIndex >= 0);
 
