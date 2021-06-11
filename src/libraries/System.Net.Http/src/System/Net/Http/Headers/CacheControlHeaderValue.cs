@@ -400,7 +400,7 @@ namespace System.Net.Http.Headers
             List<NameValueHeaderValue> nameValueList = new List<NameValueHeaderValue>();
             while (current < input.Length)
             {
-                if (!s_nameValueListParser.TryParseValue(input, null, ref current, out nameValue))
+                if (!GenericHeaderParser.MultipleValueNameValueParser.TryParseValue(input, null, ref current, out nameValue))
                 {
                     return 0;
                 }
