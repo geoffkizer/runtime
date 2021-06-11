@@ -60,6 +60,9 @@ namespace System.Net.Http.Headers
             return false;
         }
 
+        internal static int GetTransferCodingLength(string input, int startIndex, out TransferCodingHeaderValue? parsedValue) =>
+            GetTransferCodingLength(input, startIndex, static () => new TransferCodingHeaderValue(), out parsedValue);
+
         internal static int GetTransferCodingLength(string input, int startIndex,
             Func<TransferCodingHeaderValue> transferCodingCreator, out TransferCodingHeaderValue? parsedValue)
         {

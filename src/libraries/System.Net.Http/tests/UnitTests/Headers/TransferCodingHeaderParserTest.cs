@@ -1,11 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http.Headers;
-using System.Text;
 
 using Xunit;
 
@@ -16,28 +12,24 @@ namespace System.Net.Http.Tests
         [Fact]
         public void Properties_ReadValues_MatchExpectation()
         {
-            TransferCodingHeaderParser parser = TransferCodingHeaderParser.MultipleValueParser;
-            Assert.True(parser.SupportsMultipleValues);
-            Assert.Null(parser.Comparer);
+            Assert.True(TransferCodingHeaderParser.MultipleValueParser.SupportsMultipleValues);
+            Assert.Null(TransferCodingHeaderParser.MultipleValueParser.Comparer);
 
-            parser = TransferCodingHeaderParser.SingleValueParser;
-            Assert.False(parser.SupportsMultipleValues);
-            Assert.Null(parser.Comparer);
+            Assert.False(TransferCodingHeaderParser.SingleValueParser.SupportsMultipleValues);
+            Assert.Null(TransferCodingHeaderParser.SingleValueParser.Comparer);
 
-            parser = TransferCodingHeaderParser.MultipleValueWithQualityParser;
-            Assert.True(parser.SupportsMultipleValues);
-            Assert.Null(parser.Comparer);
+            Assert.True(TransferCodingHeaderParser.MultipleValueWithQualityParser.SupportsMultipleValues);
+            Assert.Null(TransferCodingHeaderParser.MultipleValueWithQualityParser.Comparer);
 
-            parser = TransferCodingHeaderParser.SingleValueWithQualityParser;
-            Assert.False(parser.SupportsMultipleValues);
-            Assert.Null(parser.Comparer);
+            Assert.False(TransferCodingHeaderParser.SingleValueWithQualityParser.SupportsMultipleValues);
+            Assert.Null(TransferCodingHeaderParser.SingleValueWithQualityParser.Comparer);
         }
 
         [Fact]
         public void Parse_ValidValue_ReturnsTransferCodingHeaderValue()
         {
             // This test verifies that Parse() correctly calls TryParse().
-            TransferCodingHeaderParser parser = TransferCodingHeaderParser.MultipleValueParser;
+            var parser = TransferCodingHeaderParser.MultipleValueParser;
             int index = 2;
 
             TransferCodingHeaderValue expected = new TransferCodingHeaderValue("custom");
@@ -50,7 +42,7 @@ namespace System.Net.Http.Tests
         public void Parse_InvalidValue_Throw()
         {
             // This test verifies that Parse() correctly calls TryParse().
-            TransferCodingHeaderParser parser = TransferCodingHeaderParser.MultipleValueParser;
+            var parser = TransferCodingHeaderParser.MultipleValueParser;
             int index = 0;
 
             Assert.Throws<FormatException>(() => { parser.ParseValue("custom;=value", null, ref index); });
@@ -99,7 +91,7 @@ namespace System.Net.Http.Tests
         private void CheckValidParsedValue(string input, int index, TransferCodingHeaderValue expectedResult,
             int expectedIndex)
         {
-            TransferCodingHeaderParser parser = TransferCodingHeaderParser.MultipleValueParser;
+            var parser = TransferCodingHeaderParser.MultipleValueParser;
             object result = null;
             Assert.True(parser.TryParseValue(input, null, ref index, out result),
                 string.Format("TryParse returned false. Input: '{0}', Index: {1}", input, index));
@@ -109,7 +101,7 @@ namespace System.Net.Http.Tests
 
         private void CheckInvalidParsedValue(string source, int index)
         {
-            TransferCodingHeaderParser parser = TransferCodingHeaderParser.MultipleValueParser;
+            var parser = TransferCodingHeaderParser.MultipleValueParser;
             object result = null;
             int newIndex = index;
             Assert.False(parser.TryParseValue(source, null, ref newIndex, out result),

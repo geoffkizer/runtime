@@ -5,41 +5,12 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
-    // TODO: Not right re TransferCodingWithQualityHeaderValue
-    internal sealed class TransferCodingHeaderParser : BaseHeaderParser<TransferCodingHeaderValue>
+    internal static class TransferCodingHeaderParser
     {
-        private readonly Func<TransferCodingHeaderValue> _transferCodingCreator;
-
-        internal static readonly TransferCodingHeaderParser SingleValueParser =
-            new TransferCodingHeaderParser(false, CreateTransferCoding);
-        internal static readonly TransferCodingHeaderParser MultipleValueParser =
-            new TransferCodingHeaderParser(true, CreateTransferCoding);
-        internal static readonly TransferCodingHeaderParser SingleValueWithQualityParser =
-            new TransferCodingHeaderParser(false, CreateTransferCodingWithQuality);
-        internal static readonly TransferCodingHeaderParser MultipleValueWithQualityParser =
-            new TransferCodingHeaderParser(true, CreateTransferCodingWithQuality);
-
-        private TransferCodingHeaderParser(bool supportsMultipleValues,
-            Func<TransferCodingHeaderValue> transferCodingCreator)
-            : base(supportsMultipleValues)
-        {
-            _transferCodingCreator = transferCodingCreator;
-        }
-
-        protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
-            out TransferCodingHeaderValue? parsedValue)
-        {
-            return TransferCodingHeaderValue.GetTransferCodingLength(value, startIndex, _transferCodingCreator, out parsedValue);
-        }
-
-        private static TransferCodingHeaderValue CreateTransferCoding()
-        {
-            return new TransferCodingHeaderValue();
-        }
-
-        private static TransferCodingHeaderValue CreateTransferCodingWithQuality()
-        {
-            return new TransferCodingWithQualityHeaderValue();
-        }
+        // TODO: Move
+        internal static readonly GenericSingleValueHeaderParser<TransferCodingHeaderValue> SingleValueParser = new(TransferCodingHeaderValue.GetTransferCodingLength);
+        internal static readonly GenericMultipleValueHeaderParser<TransferCodingHeaderValue> MultipleValueParser = new(TransferCodingHeaderValue.GetTransferCodingLength);
+        internal static readonly GenericSingleValueHeaderParser<TransferCodingWithQualityHeaderValue> SingleValueWithQualityParser = new(TransferCodingWithQualityHeaderValue.GetTransferCodingWithQualityLength);
+        internal static readonly GenericMultipleValueHeaderParser<TransferCodingWithQualityHeaderValue> MultipleValueWithQualityParser = new(TransferCodingWithQualityHeaderValue.GetTransferCodingWithQualityLength);
     }
 }

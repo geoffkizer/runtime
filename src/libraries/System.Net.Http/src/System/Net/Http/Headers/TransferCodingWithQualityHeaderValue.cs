@@ -61,5 +61,13 @@ namespace System.Net.Http.Headers
             }
             return false;
         }
+
+        // TODO: Consider further cleanup here to avoid cast
+        internal static int GetTransferCodingWithQualityLength(string input, int startIndex, out TransferCodingWithQualityHeaderValue? parsedValue)
+        {
+            int length = GetTransferCodingLength(input, startIndex, static () => new TransferCodingHeaderValue(), out TransferCodingHeaderValue? result);
+            parsedValue = (TransferCodingWithQualityHeaderValue?)result;
+            return length;
+        }
     }
 }
