@@ -10,14 +10,13 @@ namespace System.Net.Http.Headers
     /// <summary>
     /// Parses Alt-Svc header values, per RFC 7838 Section 3.
     /// </summary>
-    internal sealed class AltSvcHeaderParser : BaseHeaderParser<AltSvcHeaderValue>
+    internal sealed class AltSvcHeaderParser : BaseMultipleValueHeaderParser<AltSvcHeaderValue>
     {
         internal const long DefaultMaxAgeTicks = 24 * TimeSpan.TicksPerHour;
 
         public static AltSvcHeaderParser Parser { get; } = new AltSvcHeaderParser();
 
         private AltSvcHeaderParser()
-            : base(supportsMultipleValues: true)
         {
         }
 

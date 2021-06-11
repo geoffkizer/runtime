@@ -5,7 +5,7 @@ using System.Diagnostics;
 
 namespace System.Net.Http.Headers
 {
-    internal sealed class CacheControlHeaderParser : BaseHeaderParser<CacheControlHeaderValue>
+    internal sealed class CacheControlHeaderParser : BaseMultipleValueHeaderParser<CacheControlHeaderValue>
     {
         internal static readonly CacheControlHeaderParser Parser = new CacheControlHeaderParser();
 
@@ -15,7 +15,6 @@ namespace System.Net.Http.Headers
         // Cache-Control headers, only one instance of CacheControlHeaderValue is created (if all headers contain valid
         // values, otherwise we may have multiple strings containing the invalid values).
         private CacheControlHeaderParser()
-            : base(true)
         {
         }
 
