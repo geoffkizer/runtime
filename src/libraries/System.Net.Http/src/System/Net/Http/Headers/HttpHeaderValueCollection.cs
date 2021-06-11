@@ -176,13 +176,13 @@ namespace System.Net.Http.Headers
                     // We have multiple values. Iterate through the values and return them.
                     foreach (object item in storeValues)
                     {
-                        Debug.Assert(item is T);
+                        Debug.Assert(item is T, $"Expected {typeof(T)} but found {item.GetType()}");
                         yield return (T)item;
                     }
                 }
                 else
                 {
-                    Debug.Assert(storeValue is T);
+                    Debug.Assert(storeValue is T, $"Expected {typeof(T)} but found {storeValue.GetType()}");
                     yield return (T)storeValue;
                 }
             }

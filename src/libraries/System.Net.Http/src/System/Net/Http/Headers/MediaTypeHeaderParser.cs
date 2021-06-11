@@ -8,6 +8,6 @@ namespace System.Net.Http.Headers
         // TODO: Move these
         internal static readonly GenericSingleValueHeaderParser<MediaTypeHeaderValue> SingleValueParser = new(MediaTypeHeaderValue.GetMediaTypeLength);
         internal static readonly GenericSingleValueHeaderParser<MediaTypeWithQualityHeaderValue> SingleValueWithQualityParser = new(MediaTypeWithQualityHeaderValue.GetMediaTypeWithQualityLength);
-        internal static readonly GenericMultipleValueHeaderParser<MediaTypeHeaderValue> MultipleValuesParser = new(MediaTypeHeaderValue.GetMediaTypeLength);
+        internal static readonly GenericMultipleValueHeaderParser<MediaTypeWithQualityHeaderValue> MultipleValuesParser = new(MediaTypeWithQualityHeaderValue.GetMediaTypeWithQualityLength);
     }
 }
