@@ -74,22 +74,13 @@ namespace System.Net.Http.Headers
         public static new NameValueWithParametersHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (NameValueWithParametersHeaderValue)GenericHeaderParser.SingleValueNameValueWithParametersParser
-                .ParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueNameValueWithParametersParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out NameValueWithParametersHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.SingleValueNameValueWithParametersParser.TryParseValue(input,
-                null, ref index, out object? output))
-            {
-                parsedValue = (NameValueWithParametersHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.SingleValueNameValueWithParametersParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetNameValueWithParametersLength(string? input, int startIndex, out NameValueWithParametersHeaderValue? parsedValue)

@@ -112,20 +112,13 @@ namespace System.Net.Http.Headers
         public static RangeHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (RangeHeaderValue)GenericHeaderParser.RangeParser.ParseValue(input, null, ref index);
+            return GenericHeaderParser.RangeParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out RangeHeaderValue? parsedValue)
         {
             int index = 0;
-             parsedValue = null;
-
-            if (GenericHeaderParser.RangeParser.TryParseValue(input, null, ref index, out object? output))
-            {
-                parsedValue = (RangeHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.RangeParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetRangeLength(string? input, int startIndex, out RangeHeaderValue? parsedValue)

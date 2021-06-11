@@ -135,20 +135,13 @@ namespace System.Net.Http.Headers
         public static WarningHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (WarningHeaderValue)GenericHeaderParser.SingleValueWarningParser.ParseValue(input, null, ref index);
+            return GenericHeaderParser.SingleValueWarningParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out WarningHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.SingleValueWarningParser.TryParseValue(input, null, ref index, out object? output))
-            {
-                parsedValue = (WarningHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.SingleValueWarningParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetWarningLength(string? input, int startIndex, out WarningHeaderValue? parsedValue)

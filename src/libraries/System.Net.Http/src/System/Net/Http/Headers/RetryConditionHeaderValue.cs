@@ -88,21 +88,13 @@ namespace System.Net.Http.Headers
         public static RetryConditionHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (RetryConditionHeaderValue)GenericHeaderParser.RetryConditionParser.ParseValue(
-                input, null, ref index);
+            return GenericHeaderParser.RetryConditionParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out RetryConditionHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.RetryConditionParser.TryParseValue(input, null, ref index, out object? output))
-            {
-                parsedValue = (RetryConditionHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.RetryConditionParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetRetryConditionLength(string? input, int startIndex, out RetryConditionHeaderValue? parsedValue)

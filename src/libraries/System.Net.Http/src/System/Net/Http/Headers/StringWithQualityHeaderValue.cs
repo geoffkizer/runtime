@@ -102,22 +102,13 @@ namespace System.Net.Http.Headers
         public static StringWithQualityHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (StringWithQualityHeaderValue)GenericHeaderParser.SingleValueStringWithQualityParser.ParseValue(
-                input, null, ref index);
+            return GenericHeaderParser.SingleValueStringWithQualityParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out StringWithQualityHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.SingleValueStringWithQualityParser.TryParseValue(
-                input, null, ref index, out object? output))
-            {
-                parsedValue = (StringWithQualityHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.SingleValueStringWithQualityParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetStringWithQualityLength(string? input, int startIndex, out StringWithQualityHeaderValue? parsedValue)

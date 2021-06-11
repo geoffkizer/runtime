@@ -187,21 +187,13 @@ namespace System.Net.Http.Headers
         public static ContentDispositionHeaderValue Parse(string? input)
         {
             int index = 0;
-            return (ContentDispositionHeaderValue)GenericHeaderParser.ContentDispositionParser.ParseValue(input,
-                null, ref index);
+            return GenericHeaderParser.ContentDispositionParser.TypedParseValue(input, null, ref index);
         }
 
         public static bool TryParse([NotNullWhen(true)] string? input, [NotNullWhen(true)] out ContentDispositionHeaderValue? parsedValue)
         {
             int index = 0;
-            parsedValue = null;
-
-            if (GenericHeaderParser.ContentDispositionParser.TryParseValue(input, null, ref index, out object? output))
-            {
-                parsedValue = (ContentDispositionHeaderValue)output!;
-                return true;
-            }
-            return false;
+            return GenericHeaderParser.ContentDispositionParser.TryParseValue(input, null, ref index, out parsedValue);
         }
 
         internal static int GetDispositionTypeLength(string? input, int startIndex, out ContentDispositionHeaderValue? parsedValue)
