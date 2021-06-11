@@ -136,6 +136,9 @@ namespace System.Net.Http.Headers
             return false;
         }
 
+        internal static int GetMediaTypeLength(string? input, int startIndex, out MediaTypeHeaderValue? parsedValue) =>
+            GetMediaTypeLength(input, startIndex, static () => new MediaTypeHeaderValue(), out parsedValue);
+
         internal static int GetMediaTypeLength(string? input, int startIndex,
             Func<MediaTypeHeaderValue> mediaTypeCreator, out MediaTypeHeaderValue? parsedValue)
         {

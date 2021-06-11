@@ -42,6 +42,7 @@ namespace System.Net.Http.Headers
             return new MediaTypeWithQualityHeaderValue(this);
         }
 
+        // TODO: Clean this up
         public static new MediaTypeWithQualityHeaderValue Parse(string? input)
         {
             int index = 0;
@@ -60,6 +61,14 @@ namespace System.Net.Http.Headers
                 return true;
             }
             return false;
+        }
+
+        // TODO: Consider further cleanup here to avoid cast
+        internal static int GetMediaTypeWithQualityLength(string? input, int startIndex, out MediaTypeWithQualityHeaderValue? parsedValue)
+        {
+            int length = GetMediaTypeLength(input, startIndex, static () => new MediaTypeWithQualityHeaderValue(), out MediaTypeHeaderValue? result);
+            parsedValue = (MediaTypeWithQualityHeaderValue?)result;
+            return length;
         }
     }
 }

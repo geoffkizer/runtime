@@ -23,19 +23,13 @@ namespace System.Net.Http.Headers
             Func<TransferCodingHeaderValue> transferCodingCreator)
             : base(supportsMultipleValues)
         {
-            Debug.Assert(transferCodingCreator != null);
-
             _transferCodingCreator = transferCodingCreator;
         }
 
         protected override int GetParsedValueLength(string value, int startIndex, object? storeValue,
             out TransferCodingHeaderValue? parsedValue)
         {
-            int resultLength = TransferCodingHeaderValue.GetTransferCodingLength(value, startIndex,
-                _transferCodingCreator, out TransferCodingHeaderValue? temp);
-
-            parsedValue = temp;
-            return resultLength;
+            return TransferCodingHeaderValue.GetTransferCodingLength(value, startIndex, _transferCodingCreator, out parsedValue);
         }
 
         private static TransferCodingHeaderValue CreateTransferCoding()

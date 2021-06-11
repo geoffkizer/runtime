@@ -1,47 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Diagnostics;
-
 namespace System.Net.Http.Headers
 {
-    // TODO: Not quite right re MediaTypeWithQualityHeaderValue
-
-    internal sealed class MediaTypeHeaderParser : BaseHeaderParser<MediaTypeHeaderValue>
+    internal static class MediaTypeHeaderParser
     {
-        private readonly bool _supportsMultipleValues;
-        private readonly Func<MediaTypeHeaderValue> _mediaTypeCreator;
-
-        internal static readonly MediaTypeHeaderParser SingleValueParser = new MediaTypeHeaderParser(false, CreateMediaType);
-        internal static readonly MediaTypeHeaderParser SingleValueWithQualityParser = new MediaTypeHeaderParser(false, CreateMediaTypeWithQuality);
-        internal static readonly MediaTypeHeaderParser MultipleValuesParser = new MediaTypeHeaderParser(true, CreateMediaTypeWithQuality);
-
-        private MediaTypeHeaderParser(bool supportsMultipleValues, Func<MediaTypeHeaderValue> mediaTypeCreator)
-            : base(supportsMultipleValues)
-        {
-            Debug.Assert(mediaTypeCreator != null);
-
-            _supportsMultipleValues = supportsMultipleValues;
-            _mediaTypeCreator = mediaTypeCreator;
-        }
-
-        protected override int GetParsedValueLength(string? value, int startIndex, object? storeValue,
-            out MediaTypeHeaderValue? parsedValue)
-        {
-            int resultLength = MediaTypeHeaderValue.GetMediaTypeLength(value, startIndex, _mediaTypeCreator, out MediaTypeHeaderValue? temp);
-
-            parsedValue = temp;
-            return resultLength;
-        }
-
-        private static MediaTypeHeaderValue CreateMediaType()
-        {
-            return new MediaTypeHeaderValue();
-        }
-
-        private static MediaTypeHeaderValue CreateMediaTypeWithQuality()
-        {
-            return new MediaTypeWithQualityHeaderValue();
-        }
+        // TODO: Move these
+        internal static readonly GenericSingleValueHeaderParser<MediaTypeHeaderValue> SingleValueParser = new(MediaTypeHeaderValue.GetMediaTypeLength);
+        internal static readonly GenericSingleValueHeaderParser<MediaTypeWithQualityHeaderValue> SingleValueWithQualityParser = new(MediaTypeWithQualityHeaderValue.GetMediaTypeWithQualityLength);
+        internal static readonly GenericMultipleValueHeaderParser<MediaTypeHeaderValue> MultipleValuesParser = new(MediaTypeHeaderValue.GetMediaTypeLength);
     }
 }

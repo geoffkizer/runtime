@@ -16,20 +16,18 @@ namespace System.Net.Http.Tests
         [Fact]
         public void Properties_ReadValues_MatchExpectation()
         {
-            MediaTypeHeaderParser parser = MediaTypeHeaderParser.SingleValueParser;
-            Assert.False(parser.SupportsMultipleValues, "SupportsMultipleValues");
-            Assert.Null(parser.Comparer);
+            Assert.False(MediaTypeHeaderParser.SingleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
+            Assert.Null(MediaTypeHeaderParser.SingleValueParser.Comparer);
 
-            parser = MediaTypeHeaderParser.MultipleValuesParser;
-            Assert.True(parser.SupportsMultipleValues, "SupportsMultipleValues");
-            Assert.Null(parser.Comparer);
+            Assert.True(MediaTypeHeaderParser.MultipleValuesParser.SupportsMultipleValues, "SupportsMultipleValues");
+            Assert.Null(MediaTypeHeaderParser.MultipleValuesParser.Comparer);
         }
 
         [Fact]
         public void Parse_ValidValue_ReturnsMediaTypeHeaderValue()
         {
             // This test verifies that Parse() correctly calls TryParse().
-            MediaTypeHeaderParser parser = MediaTypeHeaderParser.SingleValueParser;
+            var parser = MediaTypeHeaderParser.SingleValueParser;
             int index = 2;
 
             MediaTypeHeaderValue expected = new MediaTypeHeaderValue("text/plain");
@@ -42,7 +40,7 @@ namespace System.Net.Http.Tests
         public void Parse_InvalidValue_Throw()
         {
             // This test verifies that Parse() correctly calls TryParse().
-            MediaTypeHeaderParser parser = MediaTypeHeaderParser.SingleValueParser;
+            var parser = MediaTypeHeaderParser.SingleValueParser;
             int index = 0;
 
             // only one value allowed.
@@ -52,7 +50,7 @@ namespace System.Net.Http.Tests
         [Fact]
         public void Parse_NullValue_Throw()
         {
-            MediaTypeHeaderParser parser = MediaTypeHeaderParser.SingleValueParser;
+            var parser = MediaTypeHeaderParser.SingleValueParser;
             int index = 0;
 
             Assert.Throws<FormatException>(() => { parser.ParseValue(null, null, ref index); });
@@ -124,7 +122,7 @@ namespace System.Net.Http.Tests
         private void CheckValidParsedValue(string input, int startIndex, MediaTypeHeaderValue expectedResult,
             int expectedIndex, bool supportsMultipleValues)
         {
-            MediaTypeHeaderParser parser = null;
+            HttpHeaderParser parser = null;
             if (supportsMultipleValues)
             {
                 parser = MediaTypeHeaderParser.MultipleValuesParser;
@@ -143,7 +141,7 @@ namespace System.Net.Http.Tests
 
         private void CheckInvalidParsedValue(string input, int startIndex, bool supportsMultipleValues)
         {
-            MediaTypeHeaderParser parser = null;
+            HttpHeaderParser parser = null;
             if (supportsMultipleValues)
             {
                 parser = MediaTypeHeaderParser.MultipleValuesParser;
