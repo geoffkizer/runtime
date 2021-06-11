@@ -1,11 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http.Headers;
-using System.Text;
 
 using Xunit;
 
@@ -19,8 +15,8 @@ namespace System.Net.Http.Tests
             Assert.False(ProductInfoHeaderParser.SingleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
             Assert.Null(ProductInfoHeaderParser.SingleValueParser.Comparer);
 
-            Assert.True(ProductInfoHeaderParser.SingleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
-            Assert.Null(ProductInfoHeaderParser.SingleValueParser.Comparer);
+            Assert.True(ProductInfoHeaderParser.MultipleValueParser.SupportsMultipleValues, "SupportsMultipleValues");
+            Assert.Null(ProductInfoHeaderParser.MultipleValueParser.Comparer);
         }
 
         [Fact]
